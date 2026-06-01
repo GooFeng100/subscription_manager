@@ -5,6 +5,7 @@ import DashboardPage from "../pages/DashboardPage.vue";
 import RedeemPage from "../pages/RedeemPage.vue";
 import PasswordPage from "../pages/PasswordPage.vue";
 import HelpPage from "../pages/HelpPage.vue";
+import RotationPage from "../pages/RotationPage.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,7 @@ export const router = createRouter({
     { path: "/dashboard", component: DashboardPage },
     { path: "/redeem", component: RedeemPage },
     { path: "/password", component: PasswordPage },
-    { path: "/help", component: HelpPage }
+    { path: "/help", component: HelpPage },
+    { path: "/rotation", component: RotationPage }
   ]
 });

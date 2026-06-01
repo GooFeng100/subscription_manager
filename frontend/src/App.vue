@@ -9,6 +9,7 @@
         <RouterLink to="/redeem">兑换</RouterLink>
         <RouterLink to="/password">改密</RouterLink>
         <RouterLink to="/help">说明</RouterLink>
+        <RouterLink to="/rotation">轮换</RouterLink>
       </nav>
     </header>
     <RouterView />

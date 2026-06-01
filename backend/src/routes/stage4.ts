@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { redis } from "../lib/redis.js";
 import { subAccessLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
+import { getCurrentSubVersion } from "./stage6.js";
 
 const router = Router();
 
@@ -50,6 +51,7 @@ router.get("/sub/:token", async (req, res) => {
   const targetParsed = targetSchema.safeParse(req.query.target);
   const target = targetParsed.success ? targetParsed.data : "clash";
   const ip = clientIp(req.ip);
+  const subVersion = await getCurrentSubVersion();
 
   const now = new Date();
   const user = await usersCol().findOne({ sub_token: token });
@@ -128,7 +130,7 @@ router.get("/sub/:token", async (req, res) => {
     return res.status(429).type("text/plain; charset=utf-8").send("too many subscription requests");
   }
 
-  const cacheKey = `sm:sub:cache:${token}:${target}`;
+  const cacheKey = `sm:sub:cache:v${subVersion}:${token}:${target}`;
   const cached = await redis.get(cacheKey);
   if (cached) {
     await writeAccessLog({
@@ -141,7 +143,11 @@ router.get("/sub/:token", async (req, res) => {
       success: true,
       message: "cache hit"
     });
-    return res.status(200).type("text/plain; charset=utf-8").send(cached);
+    return res
+      .status(200)
+      .setHeader("X-Subscription-Version", String(subVersion))
+      .type("text/plain; charset=utf-8")
+      .send(cached);
   }
 
   const enabledUpstreams = await upstreamsCol().find({ enabled: true }).sort({ updated_at: -1 }).toArray();
@@ -212,7 +218,11 @@ router.get("/sub/:token", async (req, res) => {
       success: true,
       message: "ok"
     });
-    return res.status(200).type("text/plain; charset=utf-8").send(text);
+    return res
+      .status(200)
+      .setHeader("X-Subscription-Version", String(subVersion))
+      .type("text/plain; charset=utf-8")
+      .send(text);
   } catch (e) {
     const message = e instanceof Error ? e.message : "converter request error";
     await writeAccessLog({

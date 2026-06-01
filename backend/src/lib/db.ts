@@ -101,6 +101,26 @@ export type SubAccessLogDoc = {
   created_at: Date;
 };
 
+export type RotationLogDoc = {
+  _id?: ObjectId;
+  from_version: number;
+  to_version: number | null;
+  reason: string;
+  operator_user_id: ObjectId;
+  operator_username: string;
+  impacted_user_count: number;
+  success: boolean;
+  message: string;
+  created_at: Date;
+};
+
+export type SystemStateDoc = {
+  _id?: ObjectId;
+  key: string;
+  sub_version: number;
+  updated_at: Date;
+};
+
 const client = new MongoClient(env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 let connected = false;
 
@@ -144,6 +164,14 @@ export function subAccessLogsCol() {
   return getDb().collection<SubAccessLogDoc>("sub_access_logs");
 }
 
+export function rotationLogsCol() {
+  return getDb().collection<RotationLogDoc>("rotation_logs");
+}
+
+export function systemStateCol() {
+  return getDb().collection<SystemStateDoc>("system_state");
+}
+
 export async function ensureIndexes() {
   await usersCol().createIndex({ username: 1 }, { unique: true });
   await usersCol().createIndex({ sub_token: 1 }, { unique: true });
@@ -159,4 +187,6 @@ export async function ensureIndexes() {
   await subAccessLogsCol().createIndex({ token: 1, created_at: -1 });
   await subAccessLogsCol().createIndex({ user_id: 1, created_at: -1 });
   await subAccessLogsCol().createIndex({ created_at: -1 });
+  await rotationLogsCol().createIndex({ created_at: -1 });
+  await systemStateCol().createIndex({ key: 1 }, { unique: true });
 }
