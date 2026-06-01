@@ -6,90 +6,89 @@
 
 ## Round Goal
 
-Reduce resource usage by removing nginx/web container and serving frontend directly from Caddy.
+Implement Stage 2 (users + one-time activation codes) with backend APIs, minimal frontend management page, and Docker verification.
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round completed compose deployment refactor from `caddy + web(nginx)` to `caddy-only` static hosting.
-- No backend/frontend business logic code changes were made in this round.
+- This round completed core Stage 2 backend capabilities and a minimal Stage 2 UI entry page.
+- Business code changed in backend routes/db schema and frontend `App.vue`.
 
 ## Current Completed Stage
 
 - Stage 0 scaffold: completed.
-- Stage 1 auth foundation: present in current codebase (per existing README and backend routes).
-- Task inheritance/handoff baseline documents: completed (`AGENTS.md`, `docs/CODEX_HANDOFF.md`, `docs/PROGRESS.md`).
-- Task-state synchronization mechanism: completed in this round.
-- Task-book unification: completed (`docs/DEV_TASK.md` now exists).
-- Git repository initialization and first commit: completed.
+- Stage 1 auth foundation: completed and retained.
+- Stage 2 core backend (user status management, one-time code flow, renew logs): completed in this round.
+- Stage 2 minimal management page: completed in this round.
 
 ## Docker Status
 
-- Compose refactor:
-  - Removed `web` service from compose.
-  - Switched `caddy` service to built image (`subscription-manager-caddy:latest`) that bundles frontend `dist` assets.
-  - Caddy now serves static files directly and reverse-proxies backend routes (`/api/*`, `/health`, `/config`) to `app:3000`.
-- Runtime checks from agent session:
-  - `docker compose up -d --build`: success
-  - `docker compose up -d --remove-orphans`: success, removed orphan `subscription-manager-web`
-  - `docker compose ps`: success; only `app/caddy/mongodb/redis` in project stack
-  - `docker compose logs --tail=80`: success, logs readable
-- Compose warnings:
-  - Both `compose.yaml` and `docker-compose.yml` exist.
-  - Docker Compose selected `/vol1/1000/docker/subscription_manager/compose.yaml`.
-- Effective status:
-  - Project stack now runs with 4 containers (excluding unrelated host containers).
+- `docker compose up -d --build app caddy` and `docker compose up -d --build`: success.
+- Containers status: `subscription-manager-app`, `subscription-manager-caddy`, `subscription-manager-mongodb`, `subscription-manager-redis` are `Up`.
+- `mongodb` and `redis` health checks remain healthy.
+- Compose warning persists: both `compose.yaml` and `docker-compose.yml` exist; compose uses `compose.yaml`.
 
 ## API Status
 
-Based on read-only checks at `http://127.0.0.1:8084`:
+Verified via `http://127.0.0.1:8084`:
 
-- `GET /`: `200 OK` (frontend entry reachable via Caddy).
-- `GET /health`: `200 OK` with MongoDB and Redis reported connected.
-- `GET /config`: `200 OK`, base URL and runtime config returned.
+- `GET /`: `200 OK`
+- `GET /health`: `200 OK`
+- Stage 2 API functional checks:
+  - `POST /api/admin/codes`: `201`
+  - `POST /api/redeem`: `200`
+  - `GET /api/admin/renew-logs`: `200`
+  - second redeem with same code returns `409` (one-time use enforced)
 
 ## Task Spec Reference
 
 - Canonical task-book file: `docs/DEV_TASK.md`
-- Source copied from: `/vol1/1000/docker/subscription_manager/subscription_manager_dev_task.md`
+- Active milestone target: Stage 2
 
 ## Changes In This Round
 
-- Added: `caddy/Dockerfile` (build frontend dist and package with Caddy runtime).
-- Updated: `caddy/Caddyfile` (static hosting + SPA fallback + backend reverse proxy).
-- Updated: `compose.yaml` (remove `web`; make `caddy` built service).
-- Updated: `docker-compose.yml` (same as above for consistency).
-- Updated: `docs/TASK_STATE.md` (this round state sync).
+- Added: `backend/src/routes/stage2.ts`
+- Updated: `backend/src/lib/db.ts` (activation codes + renew logs types/collections/indexes)
+- Updated: `backend/src/index.ts` (mount Stage 2 routes)
+- Updated: `caddy/Caddyfile` (fix API-first route handling to avoid SPA fallback swallowing `/api`)
+- Updated: `frontend/src/App.vue` (minimal Stage 2 operations page)
+- Updated: `docs/TASK_STATE.md`
 
 ## Commands Executed In This Round
 
+- `sed -n '1150,1235p' docs/DEV_TASK.md`
+- `docker compose up -d --build app caddy`
 - `docker compose up -d --build`
 - `docker compose ps`
-- `docker compose logs --tail=80`
+- `docker exec subscription-manager-caddy cat /etc/caddy/Caddyfile`
 - `curl http://127.0.0.1:8084/`
 - `curl http://127.0.0.1:8084/health`
-- `docker compose up -d --remove-orphans`
-- `docker ps`
+- API flow tests:
+  - admin login
+  - user register/login
+  - code create/list
+  - redeem
+  - renew logs query
+  - repeat redeem conflict check
 
 ## Test Results
 
-- `GET /` via Caddy: `200 OK`, frontend HTML returned.
-- `GET /health`: `200 OK`, Mongo and Redis connected.
-- Compose stack status:
-  - `subscription-manager-app` Up
-  - `subscription-manager-caddy` Up (`8084->80`)
-  - `subscription-manager-redis` Up (healthy)
-  - `subscription-manager-mongodb` Up (healthy)
-- `subscription-manager-web` orphan container removed successfully.
-- No backend/frontend business logic changes were made.
+- End-to-end Stage 2 core flow works:
+  - newly registered user starts as `inactive`
+  - redeem success switches user to `active`
+  - `expire_at` and `disable_after` are calculated and returned
+  - same code second redeem fails with `409`
+  - renew logs are written and queryable
+- Caddy/API routing issue was found and fixed in this round.
+- Note: local `npm run typecheck` in host shell failed because local toolchain is not installed (`tsc: not found`), but Docker build pipeline compiles backend/frontend successfully.
 
 ## Next Tasks
 
-1. Continue API/interface development with 4-container baseline.
-2. Keep validation cycle: `docker compose up -d --build` + `docker compose ps` + `docker compose logs --tail=100`.
-3. Optional: remove one compose file alias later to eliminate duplicate-file warning.
+1. Continue Stage 2 polishing: add admin endpoints for code copy/revoke/delete UI controls and manual renew controls refinement.
+2. Add explicit concurrent redeem stress test script (parallel requests) to hard-verify single-success behavior under load.
+3. After Stage 2 acceptance confirmation, commit and push milestone to GitHub.
 
 ## Open Issues
 
-- No blocking runtime issue observed for current deployment.
-- Non-blocking warning persists: dual compose files detected; compose defaults to `compose.yaml`.
+- Non-blocking: duplicate compose filename warning still exists.
+- Optional hardening: add database transaction/session wrapper for redeem + user update + renew log write to strengthen atomicity guarantees.

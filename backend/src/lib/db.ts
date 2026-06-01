@@ -38,6 +38,42 @@ export type AuthLogDoc = {
   created_at: Date;
 };
 
+export type ActivationCodeStatus = "unused" | "used" | "revoked";
+
+export type ActivationCodeDoc = {
+  _id?: ObjectId;
+  code: string;
+  duration_days: number;
+  grace_days: number;
+  status: ActivationCodeStatus;
+  used_by_user_id: ObjectId | null;
+  used_by_username: string | null;
+  used_at: Date | null;
+  revoked_at: Date | null;
+  note: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type RenewalLogDoc = {
+  _id?: ObjectId;
+  user_id: ObjectId;
+  username: string;
+  activation_code_id: ObjectId | null;
+  activation_code: string | null;
+  duration_days: number;
+  grace_days: number;
+  previous_expire_at: Date | null;
+  previous_disable_after: Date | null;
+  next_expire_at: Date;
+  next_disable_after: Date;
+  operator_user_id: ObjectId;
+  operator_type: "admin" | "user";
+  operator_username: string;
+  source: "redeem" | "admin_manual";
+  created_at: Date;
+};
+
 const client = new MongoClient(env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 let connected = false;
 
@@ -65,10 +101,22 @@ export function authLogsCol() {
   return getDb().collection<AuthLogDoc>("auth_logs");
 }
 
+export function activationCodesCol() {
+  return getDb().collection<ActivationCodeDoc>("activation_codes");
+}
+
+export function renewalLogsCol() {
+  return getDb().collection<RenewalLogDoc>("renewal_logs");
+}
+
 export async function ensureIndexes() {
   await usersCol().createIndex({ username: 1 }, { unique: true });
   await usersCol().createIndex({ sub_token: 1 }, { unique: true });
   await adminsCol().createIndex({ username: 1 }, { unique: true });
   await authLogsCol().createIndex({ created_at: 1 });
   await authLogsCol().createIndex({ username: 1, created_at: 1 });
+  await activationCodesCol().createIndex({ code: 1 }, { unique: true });
+  await activationCodesCol().createIndex({ status: 1, created_at: -1 });
+  await renewalLogsCol().createIndex({ user_id: 1, created_at: -1 });
+  await renewalLogsCol().createIndex({ created_at: -1 });
 }
