@@ -6,13 +6,13 @@
 
 ## Round Goal
 
-Establish task-state synchronization mechanism for cross-thread takeover and continuity.
+Reduce resource usage by removing nginx/web container and serving frontend directly from Caddy.
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round is documentation/skill mechanism only.
-- No business code changes were made in this round.
+- This round completed compose deployment refactor from `caddy + web(nginx)` to `caddy-only` static hosting.
+- No backend/frontend business logic code changes were made in this round.
 
 ## Current Completed Stage
 
@@ -20,13 +20,25 @@ Establish task-state synchronization mechanism for cross-thread takeover and con
 - Stage 1 auth foundation: present in current codebase (per existing README and backend routes).
 - Task inheritance/handoff baseline documents: completed (`AGENTS.md`, `docs/CODEX_HANDOFF.md`, `docs/PROGRESS.md`).
 - Task-state synchronization mechanism: completed in this round.
+- Task-book unification: completed (`docs/DEV_TASK.md` now exists).
+- Git repository initialization and first commit: completed.
 
 ## Docker Status
 
-- `docker compose config`: succeeds.
-- `docker compose ps`: currently blocked by Docker socket permission for user `admin`.
-- `docker compose logs --tail=100`: currently blocked by Docker socket permission for user `admin`.
-- Compose file note: both `compose.yaml` and `docker-compose.yml` exist; Docker Compose defaults to `compose.yaml`.
+- Compose refactor:
+  - Removed `web` service from compose.
+  - Switched `caddy` service to built image (`subscription-manager-caddy:latest`) that bundles frontend `dist` assets.
+  - Caddy now serves static files directly and reverse-proxies backend routes (`/api/*`, `/health`, `/config`) to `app:3000`.
+- Runtime checks from agent session:
+  - `docker compose up -d --build`: success
+  - `docker compose up -d --remove-orphans`: success, removed orphan `subscription-manager-web`
+  - `docker compose ps`: success; only `app/caddy/mongodb/redis` in project stack
+  - `docker compose logs --tail=80`: success, logs readable
+- Compose warnings:
+  - Both `compose.yaml` and `docker-compose.yml` exist.
+  - Docker Compose selected `/vol1/1000/docker/subscription_manager/compose.yaml`.
+- Effective status:
+  - Project stack now runs with 4 containers (excluding unrelated host containers).
 
 ## API Status
 
@@ -38,36 +50,46 @@ Based on read-only checks at `http://127.0.0.1:8084`:
 
 ## Task Spec Reference
 
-- `docs/DEV_TASK.md`: not found in current repository at this time.
-- Active task-book fallback in current repo: `/vol1/1000/docker/subscription_manager/subscription_manager_dev_task.md`
+- Canonical task-book file: `docs/DEV_TASK.md`
+- Source copied from: `/vol1/1000/docker/subscription_manager/subscription_manager_dev_task.md`
 
 ## Changes In This Round
 
-- Updated: `AGENTS.md` (added mandatory task-state sync rules).
-- Added: `.agents/skills/task-state-sync/SKILL.md`.
-- Added: `docs/TASK_STATE.md`.
+- Added: `caddy/Dockerfile` (build frontend dist and package with Caddy runtime).
+- Updated: `caddy/Caddyfile` (static hosting + SPA fallback + backend reverse proxy).
+- Updated: `compose.yaml` (remove `web`; make `caddy` built service).
+- Updated: `docker-compose.yml` (same as above for consistency).
+- Updated: `docs/TASK_STATE.md` (this round state sync).
 
 ## Commands Executed In This Round
 
-- `ls -la /vol1/1000/docker/subscription_manager/AGENTS.md`
-- `ls -la /vol1/1000/docker/subscription_manager/docs`
-- `ls -la /vol1/1000/docker/subscription_manager/.agents`
-- `ls -la /vol1/1000/docker/subscription_manager/docs/DEV_TASK.md`
-- `cat /vol1/1000/docker/subscription_manager/AGENTS.md`
+- `docker compose up -d --build`
+- `docker compose ps`
+- `docker compose logs --tail=80`
+- `curl http://127.0.0.1:8084/`
+- `curl http://127.0.0.1:8084/health`
+- `docker compose up -d --remove-orphans`
+- `docker ps`
 
 ## Test Results
 
-- Documentation/skill mechanism files created and readable.
-- No backend/frontend business logic tests executed in this round by design.
-- No container rebuild/restart performed in this round by design.
+- `GET /` via Caddy: `200 OK`, frontend HTML returned.
+- `GET /health`: `200 OK`, Mongo and Redis connected.
+- Compose stack status:
+  - `subscription-manager-app` Up
+  - `subscription-manager-caddy` Up (`8084->80`)
+  - `subscription-manager-redis` Up (healthy)
+  - `subscription-manager-mongodb` Up (healthy)
+- `subscription-manager-web` orphan container removed successfully.
+- No backend/frontend business logic changes were made.
 
 ## Next Tasks
 
-1. Confirm canonical task spec path (`docs/DEV_TASK.md` vs `subscription_manager_dev_task.md`).
-2. Resolve Docker socket permission so `docker compose ps` and `docker compose logs` can be used by current operator account.
-3. Continue milestone implementation and update this file at the end of each round.
+1. Continue API/interface development with 4-container baseline.
+2. Keep validation cycle: `docker compose up -d --build` + `docker compose ps` + `docker compose logs --tail=100`.
+3. Optional: remove one compose file alias later to eliminate duplicate-file warning.
 
 ## Open Issues
 
-- Git repository metadata was previously unavailable in this directory (`git status` failed as not a git repository).
-- Docker socket permission denies container status/log inspection for current account.
+- No blocking runtime issue observed for current deployment.
+- Non-blocking warning persists: dual compose files detected; compose defaults to `compose.yaml`.

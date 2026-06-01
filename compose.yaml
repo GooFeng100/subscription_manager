@@ -37,29 +37,19 @@ services:
     networks:
       - subscription-manager
 
-  web:
+  caddy:
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: caddy/Dockerfile
       args:
         VITE_APP_BASE_URL: ${APP_BASE_URL:-http://192.168.10.3:8084}
-    image: subscription-manager-web:latest
-    container_name: subscription-manager-web
-    restart: unless-stopped
-    networks:
-      - subscription-manager
-
-  caddy:
-    image: caddy:2-alpine
+    image: subscription-manager-caddy:latest
     container_name: subscription-manager-caddy
     restart: unless-stopped
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
       - "8084:80"
     depends_on:
       - app
-      - web
     networks:
       - subscription-manager
 
