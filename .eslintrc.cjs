@@ -1,0 +1,8 @@
+module.exports = {
+  root: true,
+  ignorePatterns: ["dist", "node_modules"],
+  env: {
+    es2022: true,
+    node: true
+  }
+};

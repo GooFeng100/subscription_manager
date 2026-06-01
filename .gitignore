@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+frontend/node_modules/
+backend/node_modules/
+*.cookies
+cookies.txt
+.codex/

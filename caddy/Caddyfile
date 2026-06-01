@@ -1,0 +1,6 @@
+:80 {
+  encode gzip
+  @backend path /api/* /health /config
+  reverse_proxy @backend app:3000
+  reverse_proxy web:80
+}
