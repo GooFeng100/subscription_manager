@@ -79,6 +79,46 @@
       </ul>
     </section>
 
+    <section class="card">
+      <h2>6) 上游订阅管理（管理员）</h2>
+      <div class="row">
+        <input v-model="upstreamForm.name" placeholder="名称，如 A" />
+        <input v-model="upstreamForm.provider" placeholder="供应商，如 provider-a" />
+        <input v-model="upstreamForm.sourceUrl" placeholder="订阅链接 URL" />
+        <button @click="createUpstream">新增上游</button>
+        <button @click="loadUpstreams">刷新上游</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>供应商</th>
+            <th>状态</th>
+            <th>脱敏链接</th>
+            <th>测试结果</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="u in upstreams" :key="u.id">
+            <td>{{ u.name }}</td>
+            <td>{{ u.provider }}</td>
+            <td>{{ u.enabled ? "enabled" : "disabled" }}</td>
+            <td>{{ u.source_url_masked }}</td>
+            <td>
+              {{ u.last_test_ok === null ? "-" : u.last_test_ok ? "ok" : "fail" }}
+              {{ u.last_test_status || "" }}
+            </td>
+            <td class="row">
+              <button @click="toggleUpstream(u)">{{ u.enabled ? "停用" : "启用" }}</button>
+              <button @click="testUpstream(u.id)">测试</button>
+              <button @click="deleteUpstream(u.id)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <p class="hint">{{ message }}</p>
   </main>
 </template>
@@ -109,6 +149,16 @@ type RenewLogItem = {
   operator_username: string;
 };
 
+type UpstreamItem = {
+  id: string;
+  name: string;
+  provider: string;
+  enabled: boolean;
+  source_url_masked: string;
+  last_test_ok: boolean | null;
+  last_test_status: number | null;
+};
+
 const apiBase = import.meta.env.VITE_APP_BASE_URL || "http://192.168.10.3:8084";
 const auth = ref({ username: "admin", password: "admin123456" });
 const authState = ref("未登录");
@@ -119,6 +169,12 @@ const latestCode = ref("");
 const redeemCode = ref("");
 const redeemResult = ref("");
 const message = ref("");
+const upstreamForm = ref({
+  name: "A",
+  provider: "provider-a",
+  sourceUrl: "https://example.com/sub"
+});
+const upstreams = ref<UpstreamItem[]>([]);
 
 function fmt(value: string | null) {
   if (!value) {
@@ -223,9 +279,44 @@ async function loadRenewLogs() {
   renewLogs.value = data.items || [];
 }
 
+async function createUpstream() {
+  await req("/api/admin/upstreams", {
+    method: "POST",
+    body: JSON.stringify(upstreamForm.value)
+  });
+  await loadUpstreams();
+}
+
+async function loadUpstreams() {
+  const data = await req("/api/admin/upstreams");
+  upstreams.value = data.items || [];
+}
+
+async function toggleUpstream(item: UpstreamItem) {
+  await req(`/api/admin/upstreams/${item.id}/${item.enabled ? "disable" : "enable"}`, {
+    method: "POST"
+  });
+  await loadUpstreams();
+}
+
+async function testUpstream(id: string) {
+  try {
+    await req(`/api/admin/upstreams/${id}/test`, { method: "POST" });
+  } catch (error) {
+    message.value = (error as Error).message;
+  }
+  await loadUpstreams();
+}
+
+async function deleteUpstream(id: string) {
+  await req(`/api/admin/upstreams/${id}`, { method: "DELETE" });
+  await loadUpstreams();
+}
+
 void loadUsers().catch((error) => {
   message.value = (error as Error).message;
 });
+void loadUpstreams().catch(() => undefined);
 </script>
 
 <style scoped>

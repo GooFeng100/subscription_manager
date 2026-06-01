@@ -6,89 +6,83 @@
 
 ## Round Goal
 
-Implement Stage 2 (users + one-time activation codes) with backend APIs, minimal frontend management page, and Docker verification.
+Implement Stage 3 upstream subscription management (CRUD, enable/disable, pull test, status view, sensitive URL masking).
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round completed core Stage 2 backend capabilities and a minimal Stage 2 UI entry page.
-- Business code changed in backend routes/db schema and frontend `App.vue`.
+- This round completed Stage 3 core backend APIs and minimal frontend operations entry for upstream management.
+- Business code changed in backend db schema/routes and frontend `App.vue`.
 
 ## Current Completed Stage
 
 - Stage 0 scaffold: completed.
-- Stage 1 auth foundation: completed and retained.
-- Stage 2 core backend (user status management, one-time code flow, renew logs): completed in this round.
-- Stage 2 minimal management page: completed in this round.
+- Stage 1 auth/security baseline: completed.
+- Stage 2 users + one-time activation codes: completed.
+- Stage 3 upstream management core: completed in this round.
 
 ## Docker Status
 
-- `docker compose up -d --build app caddy` and `docker compose up -d --build`: success.
-- Containers status: `subscription-manager-app`, `subscription-manager-caddy`, `subscription-manager-mongodb`, `subscription-manager-redis` are `Up`.
-- `mongodb` and `redis` health checks remain healthy.
-- Compose warning persists: both `compose.yaml` and `docker-compose.yml` exist; compose uses `compose.yaml`.
+- `docker compose up -d --build app caddy`: success.
+- Runtime containers: `subscription-manager-app`, `subscription-manager-caddy`, `subscription-manager-mongodb`, `subscription-manager-redis` are `Up`.
+- Mongo/Redis health checks remain healthy.
+- Compose warning persists: both `compose.yaml` and `docker-compose.yml` exist; compose defaults to `compose.yaml`.
 
 ## API Status
 
-Verified via `http://127.0.0.1:8084`:
+Verified against `http://127.0.0.1:8084`:
 
-- `GET /`: `200 OK`
-- `GET /health`: `200 OK`
-- Stage 2 API functional checks:
-  - `POST /api/admin/codes`: `201`
-  - `POST /api/redeem`: `200`
-  - `GET /api/admin/renew-logs`: `200`
-  - second redeem with same code returns `409` (one-time use enforced)
+- `POST /api/auth/admin/login`: `200`
+- `POST /api/admin/upstreams`: `201`
+- `GET /api/admin/upstreams`: `200`
+- `POST /api/admin/upstreams/:id/disable`: `200`
+- `POST /api/admin/upstreams/:id/enable`: `200`
+- `POST /api/admin/upstreams/:id/test`: `400` with explicit error for failing upstream pull (`HTTP 404`) as expected
+
+Stage 3 acceptance mapping:
+
+- Admin can maintain upstream entries: passed.
+- Disabled upstream can be toggled out via `enabled=false`: passed.
+- Pull test failure returns explicit error: passed.
+- Sensitive upstream URL hidden in response (`source_url_masked` only): passed.
 
 ## Task Spec Reference
 
 - Canonical task-book file: `docs/DEV_TASK.md`
-- Active milestone target: Stage 2
+- Active milestone target: Stage 3
 
 ## Changes In This Round
 
-- Added: `backend/src/routes/stage2.ts`
-- Updated: `backend/src/lib/db.ts` (activation codes + renew logs types/collections/indexes)
-- Updated: `backend/src/index.ts` (mount Stage 2 routes)
-- Updated: `caddy/Caddyfile` (fix API-first route handling to avoid SPA fallback swallowing `/api`)
-- Updated: `frontend/src/App.vue` (minimal Stage 2 operations page)
+- Added: `backend/src/routes/stage3.ts`
+- Updated: `backend/src/lib/db.ts` (upstreams type/collection/index)
+- Updated: `backend/src/index.ts` (mount Stage 3 routes)
+- Updated: `frontend/src/App.vue` (minimal upstream management section)
 - Updated: `docs/TASK_STATE.md`
 
 ## Commands Executed In This Round
 
-- `sed -n '1150,1235p' docs/DEV_TASK.md`
+- `sed -n '1176,1225p' docs/DEV_TASK.md`
 - `docker compose up -d --build app caddy`
-- `docker compose up -d --build`
-- `docker compose ps`
-- `docker exec subscription-manager-caddy cat /etc/caddy/Caddyfile`
-- `curl http://127.0.0.1:8084/`
-- `curl http://127.0.0.1:8084/health`
-- API flow tests:
+- Stage 3 API verification commands via `curl`:
   - admin login
-  - user register/login
-  - code create/list
-  - redeem
-  - renew logs query
-  - repeat redeem conflict check
+  - upstream create/list
+  - upstream disable/enable
+  - upstream test pull
 
 ## Test Results
 
-- End-to-end Stage 2 core flow works:
-  - newly registered user starts as `inactive`
-  - redeem success switches user to `active`
-  - `expire_at` and `disable_after` are calculated and returned
-  - same code second redeem fails with `409`
-  - renew logs are written and queryable
-- Caddy/API routing issue was found and fixed in this round.
-- Note: local `npm run typecheck` in host shell failed because local toolchain is not installed (`tsc: not found`), but Docker build pipeline compiles backend/frontend successfully.
+- Stage 3 backend API flow is functional and returns expected statuses.
+- Upstream list response includes masked URL only.
+- Test pull failure path is confirmed with machine-readable error details.
+- No regression observed in container health.
 
 ## Next Tasks
 
-1. Continue Stage 2 polishing: add admin endpoints for code copy/revoke/delete UI controls and manual renew controls refinement.
-2. Add explicit concurrent redeem stress test script (parallel requests) to hard-verify single-success behavior under load.
-3. After Stage 2 acceptance confirmation, commit and push milestone to GitHub.
+1. Start Stage 4 `/sub/:token` distribution endpoint (user status checks, target support, converter call).
+2. Add upstream filtering by `enabled=true` in Stage 4 aggregation path.
+3. Add Stage 4 rate-limit and subscription access logging.
 
 ## Open Issues
 
-- Non-blocking: duplicate compose filename warning still exists.
-- Optional hardening: add database transaction/session wrapper for redeem + user update + renew log write to strengthen atomicity guarantees.
+- Non-blocking compose duplicate filename warning remains.
+- Stage 3 currently performs pull test directly against source URL without extra header customization/retry strategy.

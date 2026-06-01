@@ -74,6 +74,20 @@ export type RenewalLogDoc = {
   created_at: Date;
 };
 
+export type UpstreamDoc = {
+  _id?: ObjectId;
+  name: string;
+  provider: string;
+  source_url: string;
+  enabled: boolean;
+  last_test_ok: boolean | null;
+  last_test_status: number | null;
+  last_test_error: string | null;
+  last_test_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
 const client = new MongoClient(env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 let connected = false;
 
@@ -109,6 +123,10 @@ export function renewalLogsCol() {
   return getDb().collection<RenewalLogDoc>("renewal_logs");
 }
 
+export function upstreamsCol() {
+  return getDb().collection<UpstreamDoc>("upstreams");
+}
+
 export async function ensureIndexes() {
   await usersCol().createIndex({ username: 1 }, { unique: true });
   await usersCol().createIndex({ sub_token: 1 }, { unique: true });
@@ -119,4 +137,6 @@ export async function ensureIndexes() {
   await activationCodesCol().createIndex({ status: 1, created_at: -1 });
   await renewalLogsCol().createIndex({ user_id: 1, created_at: -1 });
   await renewalLogsCol().createIndex({ created_at: -1 });
+  await upstreamsCol().createIndex({ name: 1 }, { unique: true });
+  await upstreamsCol().createIndex({ enabled: 1, updated_at: -1 });
 }
