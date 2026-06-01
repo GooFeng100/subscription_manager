@@ -6,6 +6,7 @@ import { redis } from "./lib/redis.js";
 import authRouter from "./routes/auth.js";
 import stage2Router from "./routes/stage2.js";
 import stage3Router from "./routes/stage3.js";
+import stage4Router from "./routes/stage4.js";
 import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
 
@@ -76,6 +77,7 @@ async function bootstrap() {
   app.use("/api/auth", authRouter);
   app.use("/api", stage2Router);
   app.use("/api", stage3Router);
+  app.use("/", stage4Router);
 
   app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`subscription-manager-backend listening on ${env.PORT}`);

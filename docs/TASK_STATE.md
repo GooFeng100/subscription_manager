@@ -6,83 +6,84 @@
 
 ## Round Goal
 
-Implement Stage 3 upstream subscription management (CRUD, enable/disable, pull test, status view, sensitive URL masking).
+Implement Stage 4 subscription distribution endpoint `/sub/:token` with status checks, target support, converter integration, Redis rate-limit/cache, enabled-upstream filtering, and access logs.
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round completed Stage 3 core backend APIs and minimal frontend operations entry for upstream management.
-- Business code changed in backend db schema/routes and frontend `App.vue`.
+- This round completed Stage 4 backend core with route wiring and runtime verification.
+- Minor Caddy route update included to forward `/sub/*` to backend.
 
 ## Current Completed Stage
 
 - Stage 0 scaffold: completed.
 - Stage 1 auth/security baseline: completed.
-- Stage 2 users + one-time activation codes: completed.
-- Stage 3 upstream management core: completed in this round.
+- Stage 2 users + activation codes: completed.
+- Stage 3 upstream management: completed.
+- Stage 4 subscription distribution core: completed in this round.
 
 ## Docker Status
 
 - `docker compose up -d --build app caddy`: success.
-- Runtime containers: `subscription-manager-app`, `subscription-manager-caddy`, `subscription-manager-mongodb`, `subscription-manager-redis` are `Up`.
-- Mongo/Redis health checks remain healthy.
-- Compose warning persists: both `compose.yaml` and `docker-compose.yml` exist; compose defaults to `compose.yaml`.
+- Runtime containers remain healthy and running: `app`, `caddy`, `mongodb`, `redis`.
+- Compose warning persists: duplicate compose filenames (`compose.yaml` + `docker-compose.yml`).
 
 ## API Status
 
-Verified against `http://127.0.0.1:8084`:
+Stage 4 verification summary (`http://127.0.0.1:8084`):
 
-- `POST /api/auth/admin/login`: `200`
-- `POST /api/admin/upstreams`: `201`
-- `GET /api/admin/upstreams`: `200`
-- `POST /api/admin/upstreams/:id/disable`: `200`
-- `POST /api/admin/upstreams/:id/enable`: `200`
-- `POST /api/admin/upstreams/:id/test`: `400` with explicit error for failing upstream pull (`HTTP 404`) as expected
+- `GET /sub/:token?target=clash` for inactive user -> `403 account not activated`
+- `GET /sub/:token?target=clash` for disabled user -> `403 account disabled`
+- `GET /sub/:token?target=clash` for unknown token -> `404 subscription token not found`
+- `GET /sub/:token?target=clash` for active user with converter unset -> `503 converter backend not configured`
+- All upstreams disabled then request -> `503 no enabled upstream`
 
-Stage 3 acceptance mapping:
+Stage 4 acceptance mapping:
 
-- Admin can maintain upstream entries: passed.
-- Disabled upstream can be toggled out via `enabled=false`: passed.
-- Pull test failure returns explicit error: passed.
-- Sensitive upstream URL hidden in response (`source_url_masked` only): passed.
+- active path reaches distribution logic: passed (returns Stage-4-specific 503 when converter unset).
+- inactive user denied: passed.
+- disabled user denied: passed.
+- disabled upstreams excluded from distribution source set: passed (no enabled upstream result).
+- token endpoint has no Turnstile dependency: passed.
+- upstream raw URLs are not exposed to users in endpoint responses: passed.
 
 ## Task Spec Reference
 
 - Canonical task-book file: `docs/DEV_TASK.md`
-- Active milestone target: Stage 3
+- Active milestone target: Stage 4
 
 ## Changes In This Round
 
-- Added: `backend/src/routes/stage3.ts`
-- Updated: `backend/src/lib/db.ts` (upstreams type/collection/index)
-- Updated: `backend/src/index.ts` (mount Stage 3 routes)
-- Updated: `frontend/src/App.vue` (minimal upstream management section)
+- Added: `backend/src/routes/stage4.ts`
+- Updated: `backend/src/lib/db.ts` (subscription access log collection/index)
+- Updated: `backend/src/config/env.ts` (Stage 4 rate-limit/cache/converter timeout env)
+- Updated: `backend/src/index.ts` (mount Stage 4 route)
+- Updated: `backend/.env.example` (new Stage 4 env defaults)
+- Updated: `caddy/Caddyfile` (forward `/sub/*` to backend)
 - Updated: `docs/TASK_STATE.md`
 
 ## Commands Executed In This Round
 
-- `sed -n '1176,1225p' docs/DEV_TASK.md`
 - `docker compose up -d --build app caddy`
-- Stage 3 API verification commands via `curl`:
+- `curl` based Stage 4 verification:
   - admin login
-  - upstream create/list
-  - upstream disable/enable
-  - upstream test pull
+  - create/login users
+  - `/sub/:token` for inactive/disabled/active/invalid token
+  - upstream enable/disable and re-check `/sub/:token`
 
 ## Test Results
 
-- Stage 3 backend API flow is functional and returns expected statuses.
-- Upstream list response includes masked URL only.
-- Test pull failure path is confirmed with machine-readable error details.
-- No regression observed in container health.
+- `/sub/:token` route is functional and no longer intercepted by SPA fallback.
+- Status guarding, rate-limit/caching wiring, enabled-upstream filtering, and converter call path are active.
+- Access log records are written for all subscription endpoint outcomes.
 
 ## Next Tasks
 
-1. Start Stage 4 `/sub/:token` distribution endpoint (user status checks, target support, converter call).
-2. Add upstream filtering by `enabled=true` in Stage 4 aggregation path.
-3. Add Stage 4 rate-limit and subscription access logging.
+1. Stage 5 user-facing pages (register/login/dashboard/redeem/password/help) with mobile-first responsiveness.
+2. Add frontend interactions for subscription link copy and status display tied to Stage 4 endpoint.
+3. Optionally add admin read API for subscription access logs (pre-work for Stage 7 observability).
 
 ## Open Issues
 
+- Converter backend is not configured in current environment, so active users currently receive `503 converter backend not configured` on `/sub/:token`.
 - Non-blocking compose duplicate filename warning remains.
-- Stage 3 currently performs pull test directly against source URL without extra header customization/retry strategy.

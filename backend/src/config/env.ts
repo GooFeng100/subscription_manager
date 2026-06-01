@@ -24,6 +24,9 @@ const envSchema = z.object({
   TURNSTILE_SITE_KEY: z.string().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
   CONVERTER_BACKEND_URL: z.string().optional(),
+  SUB_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(60),
+  SUB_CACHE_SECONDS: z.coerce.number().int().positive().default(120),
+  SUB_CONVERTER_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   ADMIN_USERNAME: z.string().default("admin"),
   ADMIN_PASSWORD: z.string().default("admin123456")
 });

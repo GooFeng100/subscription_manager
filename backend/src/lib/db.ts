@@ -88,6 +88,19 @@ export type UpstreamDoc = {
   updated_at: Date;
 };
 
+export type SubAccessLogDoc = {
+  _id?: ObjectId;
+  user_id: ObjectId | null;
+  username: string | null;
+  token: string;
+  target: string;
+  ip: string;
+  status_code: number;
+  success: boolean;
+  message: string;
+  created_at: Date;
+};
+
 const client = new MongoClient(env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
 let connected = false;
 
@@ -127,6 +140,10 @@ export function upstreamsCol() {
   return getDb().collection<UpstreamDoc>("upstreams");
 }
 
+export function subAccessLogsCol() {
+  return getDb().collection<SubAccessLogDoc>("sub_access_logs");
+}
+
 export async function ensureIndexes() {
   await usersCol().createIndex({ username: 1 }, { unique: true });
   await usersCol().createIndex({ sub_token: 1 }, { unique: true });
@@ -139,4 +156,7 @@ export async function ensureIndexes() {
   await renewalLogsCol().createIndex({ created_at: -1 });
   await upstreamsCol().createIndex({ name: 1 }, { unique: true });
   await upstreamsCol().createIndex({ enabled: 1, updated_at: -1 });
+  await subAccessLogsCol().createIndex({ token: 1, created_at: -1 });
+  await subAccessLogsCol().createIndex({ user_id: 1, created_at: -1 });
+  await subAccessLogsCol().createIndex({ created_at: -1 });
 }
