@@ -8,8 +8,10 @@ import stage2Router from "./routes/stage2.js";
 import stage3Router from "./routes/stage3.js";
 import stage4Router from "./routes/stage4.js";
 import stage6Router from "./routes/stage6.js";
+import stage7Router from "./routes/stage7.js";
 import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
+import { getRuntimeSettings } from "./lib/runtime-settings.js";
 
 async function bootstrap() {
   await connectDb();
@@ -67,11 +69,13 @@ async function bootstrap() {
     }
   });
 
-  app.get("/config", (_req, res) => {
+  app.get("/config", async (_req, res) => {
+    const settings = await getRuntimeSettings();
     res.json({
-      appBaseUrl: env.APP_BASE_URL,
+      appBaseUrl: settings.site_domain || env.APP_BASE_URL,
       nodeEnv: env.NODE_ENV,
-      turnstileEnabled: boolFromEnv(env.TURNSTILE_ENABLED, false)
+      turnstileEnabled: settings.turnstile_enabled,
+      turnstileSiteKey: settings.turnstile_site_key
     });
   });
 
@@ -79,6 +83,7 @@ async function bootstrap() {
   app.use("/api", stage2Router);
   app.use("/api", stage3Router);
   app.use("/api", stage6Router);
+  app.use("/api", stage7Router);
   app.use("/", stage4Router);
 
   app.listen(env.PORT, "0.0.0.0", () => {

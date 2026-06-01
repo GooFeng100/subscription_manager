@@ -117,7 +117,8 @@ export type RotationLogDoc = {
 export type SystemStateDoc = {
   _id?: ObjectId;
   key: string;
-  sub_version: number;
+  sub_version?: number;
+  payload?: Record<string, unknown>;
   updated_at: Date;
 };
 

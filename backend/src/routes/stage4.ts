@@ -5,6 +5,7 @@ import { env } from "../config/env.js";
 import { redis } from "../lib/redis.js";
 import { subAccessLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
 import { getCurrentSubVersion } from "./stage6.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 
 const router = Router();
 
@@ -52,6 +53,7 @@ router.get("/sub/:token", async (req, res) => {
   const target = targetParsed.success ? targetParsed.data : "clash";
   const ip = clientIp(req.ip);
   const subVersion = await getCurrentSubVersion();
+  const settings = await getRuntimeSettings();
 
   const now = new Date();
   const user = await usersCol().findOne({ sub_token: token });
@@ -116,7 +118,7 @@ router.get("/sub/:token", async (req, res) => {
   if (current === 1) {
     await redis.expire(rlKey, 60);
   }
-  if (current > env.SUB_RATE_LIMIT_PER_MINUTE) {
+  if (current > settings.sub_rate_limit_per_minute) {
     await writeAccessLog({
       userId: String(user._id),
       username: user.username,
@@ -165,7 +167,7 @@ router.get("/sub/:token", async (req, res) => {
     return res.status(503).type("text/plain; charset=utf-8").send("no enabled upstream");
   }
 
-  if (!env.CONVERTER_BACKEND_URL) {
+  if (!settings.converter_backend_url) {
     await writeAccessLog({
       userId: String(user._id),
       username: user.username,
@@ -180,7 +182,7 @@ router.get("/sub/:token", async (req, res) => {
   }
 
   const sourceUrls = enabledUpstreams.map((u) => u.source_url).join("|");
-  const converterUrl = new URL("/sub", env.CONVERTER_BACKEND_URL);
+  const converterUrl = new URL("/sub", settings.converter_backend_url);
   converterUrl.searchParams.set("target", target);
   converterUrl.searchParams.set("url", sourceUrls);
 
@@ -207,7 +209,7 @@ router.get("/sub/:token", async (req, res) => {
       return res.status(502).type("text/plain; charset=utf-8").send("converter request failed");
     }
 
-    await redis.set(cacheKey, text, "EX", env.SUB_CACHE_SECONDS);
+    await redis.set(cacheKey, text, "EX", settings.sub_cache_seconds);
     await writeAccessLog({
       userId: String(user._id),
       username: user.username,

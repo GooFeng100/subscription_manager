@@ -1,34 +1,36 @@
 import { env } from "../config/env.js";
-import { boolFromEnv } from "../lib/utils.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 
 export type TurnstileScene = "admin_login" | "user_login" | "register" | "redeem";
 
-function sceneEnabled(scene: TurnstileScene) {
-  if (!boolFromEnv(env.TURNSTILE_ENABLED, false)) {
+function sceneEnabled(scene: TurnstileScene, settings: Awaited<ReturnType<typeof getRuntimeSettings>>) {
+  if (!settings.turnstile_enabled) {
     return false;
   }
   if (scene === "admin_login" || scene === "user_login") {
-    return boolFromEnv(env.LOGIN_TURNSTILE_ENABLED, true);
+    return settings.login_turnstile_enabled;
   }
   if (scene === "register") {
-    return boolFromEnv(env.REGISTER_TURNSTILE_ENABLED, true);
+    return settings.register_turnstile_enabled;
   }
-  return boolFromEnv(env.REDEEM_TURNSTILE_ENABLED, true);
+  return settings.redeem_turnstile_enabled;
 }
 
 export async function verifyTurnstile(scene: TurnstileScene, token?: string) {
-  if (!sceneEnabled(scene)) {
+  const settings = await getRuntimeSettings();
+  if (!sceneEnabled(scene, settings)) {
     return { ok: true as const, skipped: true as const };
   }
   if (!token) {
     return { ok: false as const, message: "Turnstile token required" };
   }
-  if (!env.TURNSTILE_SECRET_KEY) {
+  const secret = settings.turnstile_secret_key || env.TURNSTILE_SECRET_KEY;
+  if (!secret) {
     return { ok: false as const, message: "Turnstile secret key not configured" };
   }
 
   const body = new URLSearchParams();
-  body.set("secret", env.TURNSTILE_SECRET_KEY);
+  body.set("secret", secret);
   body.set("response", token);
 
   try {

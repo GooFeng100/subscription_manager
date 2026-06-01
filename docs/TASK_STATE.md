@@ -6,13 +6,13 @@
 
 ## Round Goal
 
-Implement Stage 6 manual rotation management with double confirmation, subscription versioning, rotation logs, and impacted-user statistics.
+Complete all remaining Stage 7 backend interfaces (system settings + security-related runtime toggles + log filtering) and verify runtime effect.
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round completed Stage 6 backend rotation APIs and a minimal frontend rotation page.
-- Stage 4 distribution cache now keys by subscription version.
+- Stage 7 interface layer is now complete and verified.
+- UI formal design phase has not started yet (paused intentionally per instruction).
 
 ## Current Completed Stage
 
@@ -22,71 +22,70 @@ Implement Stage 6 manual rotation management with double confirmation, subscript
 - Stage 3 upstream management: completed.
 - Stage 4 subscription distribution core: completed.
 - Stage 5 user-facing pages core: completed.
-- Stage 6 rotation management core: completed in this round.
+- Stage 6 rotation management core: completed.
+- Stage 7 backend interfaces: completed in this round.
 
 ## Docker Status
 
-- `docker compose up -d --build app caddy`: success.
-- Containers healthy/running: `app`, `caddy`, `mongodb`, `redis`.
-- Compose warning persists about duplicated compose filename.
+- `docker compose up -d --build app` executed successfully.
+- Runtime containers healthy/running: `app`, `caddy`, `mongodb`, `redis`.
+- Compose duplicate filename warning remains non-blocking.
 
-## API/Interface Status
+## API Status
 
-Stage 6 API verification summary:
+Implemented and validated:
 
-- `GET /api/admin/rotation/status` -> `200`
-- `POST /api/admin/rotation/execute` with wrong confirm text -> `400`
-- `POST /api/admin/rotation/execute` with `confirmText=ROTATE` and enabled upstream -> `200`
-- version changed `1 -> 2` after successful rotation
-- `GET /api/admin/rotation/logs` returns success log with reason/time/result/impacted users
-- with all upstreams disabled, execute returns `400 no enabled upstream, rotation aborted`
-- failed rotation keeps version unchanged (`2` stays `2`) and writes failed log entry
+- `GET /api/admin/settings`
+- `PUT /api/admin/settings`
+- `GET /api/admin/logs/auth`
+- `GET /api/admin/logs/code-usage`
+- `GET /api/admin/logs/sub-access`
 
-Frontend:
+Runtime-effect validation:
 
-- `/rotation` route reachable (`200`) and connected to rotation status/execute/log APIs.
+- Setting `registration_enabled=false` via settings API blocks registration (`403`).
+- Stage 4 runtime reads settings for:
+  - `converter_backend_url`
+  - `sub_rate_limit_per_minute`
+  - `sub_cache_seconds`
+- Registration was restored to `true` after verification for continued development.
 
 ## Task Spec Reference
 
 - Canonical task-book file: `docs/DEV_TASK.md`
-- Active milestone target: Stage 6
+- Active milestone target: Stage 7 (interface implementation complete)
 
 ## Changes In This Round
 
-- Added: `backend/src/routes/stage6.ts`
-- Updated: `backend/src/lib/db.ts` (rotation logs + system state collections/indexes)
-- Updated: `backend/src/routes/stage4.ts` (subscription cache key includes version, adds `X-Subscription-Version` header)
-- Updated: `backend/src/index.ts` (mount Stage 6 routes)
-- Added: `frontend/src/pages/RotationPage.vue`
-- Updated: `frontend/src/router/index.ts` (add `/rotation`)
-- Updated: `frontend/src/App.vue` (add rotation nav entry)
+- Added: `backend/src/lib/runtime-settings.ts`
+- Added: `backend/src/routes/stage7.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `backend/src/routes/stage6.ts`
+- Updated: `backend/src/index.ts`
 - Updated: `docs/TASK_STATE.md`
 
 ## Commands Executed In This Round
 
-- `docker compose up -d --build app caddy`
-- `curl` checks for:
-  - rotation status
-  - rotation execute with bad confirm
-  - rotation execute with valid confirm
-  - rotation logs
-  - forced failed rotation with upstream disabled
-- page route check for `/rotation`
+- `docker compose up -d --build app`
+- `curl` verification for settings read/write
+- `curl` verification for register-block runtime effect
+- `curl` verification for auth/code/sub-access log filters
+- `docker compose ps`
 
 ## Test Results
 
-- Admin can execute manual rotation with explicit confirmation.
-- Successful rotation increments subscription version and records impacted user count.
-- Failed rotation does not overwrite/increment version and logs failure reason.
-- Rotation logs include reason, time, result, operator, and impact count.
+- Stage 7 backend interface set is operational.
+- Settings persistence and runtime coupling are operational.
+- No backend build/runtime regression after integration.
 
 ## Next Tasks
 
-1. Start Stage 7: system settings page + security settings and log viewing endpoints.
-2. Expose admin APIs for subscription access logs filtering and code usage logs filtering.
-3. Add settings persistence for converter backend/Turnstile keys/registration and limit values.
+1. Enter formal UI design phase for Stage 7 pages (settings + security + logs) after explicit approval.
+2. Then complete Stage 7 frontend acceptance and push milestone UI commit.
 
 ## Open Issues
 
-- Converter backend remains unconfigured in current environment for real subscription conversion output.
-- Non-blocking compose duplicate filename warning remains.
+- Converter backend remains unset in settings for real conversion output.
+- Compose duplicate filename warning persists.

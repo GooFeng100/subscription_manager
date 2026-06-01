@@ -16,13 +16,13 @@ const SUB_VERSION_STATE_KEY = "subscription_version";
 
 async function getCurrentSubVersion() {
   const state = await systemStateCol().findOne({ key: SUB_VERSION_STATE_KEY });
-  if (!state) {
+  if (!state || typeof state.sub_version !== "number") {
     const now = new Date();
-    await systemStateCol().insertOne({
-      key: SUB_VERSION_STATE_KEY,
-      sub_version: 1,
-      updated_at: now
-    });
+    await systemStateCol().updateOne(
+      { key: SUB_VERSION_STATE_KEY },
+      { $set: { sub_version: 1, updated_at: now } },
+      { upsert: true }
+    );
     return 1;
   }
   return state.sub_version;

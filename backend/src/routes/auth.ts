@@ -11,6 +11,7 @@ import { checkRegisterIpLimit, recordRegisterIp } from "../services/register-gua
 import { writeAuthLog } from "../services/auth-log.js";
 import { requireAdmin, requireAuth, requireUser } from "../middleware/require-role.js";
 import { authLogsCol } from "../lib/db.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 
 const router = Router();
 
@@ -107,7 +108,8 @@ router.post("/admin/login", async (req, res) => {
 });
 
 router.post("/register", async (req, res) => {
-  if (!boolFromEnv(env.REGISTRATION_ENABLED, true)) {
+  const settings = await getRuntimeSettings();
+  if (!settings.registration_enabled) {
     return res.status(403).json({ message: "Registration is disabled" });
   }
   const parsed = userAuthSchema.safeParse(req.body);
