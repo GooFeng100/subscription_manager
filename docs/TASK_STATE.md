@@ -1152,3 +1152,24 @@
 ### Next Step
 1. 执行 `git add/commit`（按里程碑说明写提交信息）。
 2. 推送远端并输出里程碑报告。
+
+## Milestone Delivery Round (Commit + Push)
+
+### Round Goal
+- 完成本阶段交付：提交本地里程碑变更并推送远端仓库。
+
+### Git Actions
+- Commit: `2ed7961`
+- Message: `feat: complete admin UI milestone and harden backend regression guards`
+- Push: `origin/master` 成功（`a97b8ae..2ed7961`）
+
+### Scope Summary
+- 管理端 UI 复刻与交互收口（users/codes/upstreams/rotation/settings/logs）。
+- 后端回归修复：
+  - `used` 授权码不可删除
+  - admin 登录校验回归修复
+  - rotation 版本规则运行态生效（`YY.M.N`）
+- 前端构建噪音修复：`tsconfig noEmit`。
+
+### Status
+- 本阶段里程碑已交付并同步到 GitHub。
