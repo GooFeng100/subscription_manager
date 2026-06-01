@@ -15,8 +15,19 @@ import { getRuntimeSettings } from "../lib/runtime-settings.js";
 
 const router = Router();
 
+const usernameSchema = z
+  .string()
+  .min(8)
+  .max(64)
+  .regex(/^[A-Za-z][A-Za-z0-9]*$/, "Username must start with a letter and contain only letters or numbers");
+
 const userAuthSchema = z.object({
-  username: z.string().min(3).max(64),
+  username: usernameSchema,
+  password: z.string().min(8).max(128),
+  turnstileToken: z.string().optional()
+});
+const adminAuthSchema = z.object({
+  username: z.string().trim().min(1).max(64),
   password: z.string().min(8).max(128),
   turnstileToken: z.string().optional()
 });
@@ -35,7 +46,7 @@ function userAgent(ua?: string) {
 }
 
 router.post("/admin/login", async (req, res) => {
-  const parsed = userAuthSchema.safeParse(req.body);
+  const parsed = adminAuthSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid request payload" });
   }

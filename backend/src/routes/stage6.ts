@@ -14,26 +14,56 @@ const executeSchema = z.object({
 const ROTATION_CONFIRM_TEXT = "ROTATE";
 const SUB_VERSION_STATE_KEY = "subscription_version";
 
+function buildVersion(yy: number, month: number, seq: number) {
+  return `${yy}.${month}.${seq}`;
+}
+
+function parseVersion(value: unknown) {
+  if (typeof value === "string") {
+    const m = value.match(/^(\d{2})\.(\d{1,2})\.(\d+)$/);
+    if (m) {
+      return {
+        yy: Number(m[1]),
+        month: Number(m[2]),
+        seq: Number(m[3]),
+        version: value
+      };
+    }
+  }
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    const now = new Date();
+    const yy = now.getFullYear() % 100;
+    const month = now.getMonth() + 1;
+    const seq = Math.floor(value);
+    return { yy, month, seq, version: buildVersion(yy, month, seq) };
+  }
+  return null;
+}
+
 async function getCurrentSubVersion() {
   const state = await systemStateCol().findOne({ key: SUB_VERSION_STATE_KEY });
-  if (!state || typeof state.sub_version !== "number") {
+  const parsed = parseVersion(state?.sub_version);
+  if (!parsed) {
     const now = new Date();
+    const yy = now.getFullYear() % 100;
+    const month = now.getMonth() + 1;
+    const version = buildVersion(yy, month, 0);
     await systemStateCol().updateOne(
       { key: SUB_VERSION_STATE_KEY },
-      { $set: { sub_version: 1, updated_at: now } },
+      { $set: { sub_version: version, updated_at: now } },
       { upsert: true }
     );
-    return 1;
+    return { yy, month, seq: 0, version };
   }
-  return state.sub_version;
+  return parsed;
 }
 
 router.get("/admin/rotation/status", requireAdmin, async (_req, res) => {
-  const version = await getCurrentSubVersion();
+  const current = await getCurrentSubVersion();
   const activeUsers = await usersCol().countDocuments({ status: { $in: ["active", "grace"] } });
   const enabledUpstreams = await upstreamsCol().countDocuments({ enabled: true });
   return res.json({
-    sub_version: version,
+    sub_version: current.version,
     active_user_count: activeUsers,
     enabled_upstream_count: enabledUpstreams,
     confirm_text: ROTATION_CONFIRM_TEXT
@@ -66,7 +96,8 @@ router.post("/admin/rotation/execute", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: `confirmText must be ${ROTATION_CONFIRM_TEXT}` });
   }
 
-  const fromVersion = await getCurrentSubVersion();
+  const current = await getCurrentSubVersion();
+  const fromVersion = current.version;
   const impactedUserCount = await usersCol().countDocuments({ status: { $in: ["active", "grace"] } });
   const enabledUpstreams = await upstreamsCol().countDocuments({ enabled: true });
   const now = new Date();
@@ -86,7 +117,10 @@ router.post("/admin/rotation/execute", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "no enabled upstream, rotation aborted" });
   }
 
-  const toVersion = fromVersion + 1;
+  const yy = now.getFullYear() % 100;
+  const month = now.getMonth() + 1;
+  const nextSeq = current.yy === yy && current.month === month ? current.seq + 1 : 1;
+  const toVersion = buildVersion(yy, month, nextSeq);
   await systemStateCol().updateOne(
     { key: SUB_VERSION_STATE_KEY },
     { $set: { sub_version: toVersion, updated_at: now } },

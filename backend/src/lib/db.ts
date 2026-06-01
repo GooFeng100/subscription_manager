@@ -103,8 +103,8 @@ export type SubAccessLogDoc = {
 
 export type RotationLogDoc = {
   _id?: ObjectId;
-  from_version: number;
-  to_version: number | null;
+  from_version: string;
+  to_version: string | null;
   reason: string;
   operator_user_id: ObjectId;
   operator_username: string;
@@ -117,7 +117,7 @@ export type RotationLogDoc = {
 export type SystemStateDoc = {
   _id?: ObjectId;
   key: string;
-  sub_version?: number;
+  sub_version?: string | number;
   payload?: Record<string, unknown>;
   updated_at: Date;
 };

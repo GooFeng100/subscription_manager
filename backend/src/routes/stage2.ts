@@ -258,7 +258,15 @@ router.delete("/admin/codes/:id", requireAdmin, async (req, res) => {
   if (!ObjectId.isValid(req.params.id)) {
     return res.status(400).json({ message: "Invalid code id" });
   }
-  const result = await activationCodesCol().deleteOne({ _id: new ObjectId(req.params.id) });
+  const id = new ObjectId(req.params.id);
+  const code = await activationCodesCol().findOne({ _id: id });
+  if (!code) {
+    return res.status(404).json({ message: "Code not found" });
+  }
+  if (code.status === "used") {
+    return res.status(409).json({ message: "Used code cannot be deleted" });
+  }
+  const result = await activationCodesCol().deleteOne({ _id: id });
   if (!result.deletedCount) {
     return res.status(404).json({ message: "Code not found" });
   }

@@ -31,7 +31,7 @@ import { ref } from "vue";
 import { api } from "../lib/api";
 
 type RotationStatus = {
-  sub_version: number;
+  sub_version: string;
   active_user_count: number;
   enabled_upstream_count: number;
   confirm_text: string;
@@ -39,8 +39,8 @@ type RotationStatus = {
 
 type RotationLog = {
   id: string;
-  from_version: number;
-  to_version: number | null;
+  from_version: string;
+  to_version: string | null;
   reason: string;
   operator_username: string;
   impacted_user_count: number;
