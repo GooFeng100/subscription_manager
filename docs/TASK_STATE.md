@@ -6,13 +6,13 @@
 
 ## Round Goal
 
-Implement Stage 4 subscription distribution endpoint `/sub/:token` with status checks, target support, converter integration, Redis rate-limit/cache, enabled-upstream filtering, and access logs.
+Implement Stage 5 user-facing pages (register/login/dashboard/redeem/help/change-password) with responsive routing-based frontend and verify end-to-end usability.
 
 ## Project Current Status
 
 - Project root: `/vol1/1000/docker/subscription_manager`
-- This round completed Stage 4 backend core with route wiring and runtime verification.
-- Minor Caddy route update included to forward `/sub/*` to backend.
+- This round completed Stage 5 frontend page set and routing structure.
+- Backend business logic unchanged in this round; validation performed against existing Stage 1/2/4 APIs.
 
 ## Current Completed Stage
 
@@ -20,70 +20,74 @@ Implement Stage 4 subscription distribution endpoint `/sub/:token` with status c
 - Stage 1 auth/security baseline: completed.
 - Stage 2 users + activation codes: completed.
 - Stage 3 upstream management: completed.
-- Stage 4 subscription distribution core: completed in this round.
+- Stage 4 subscription distribution core: completed.
+- Stage 5 user-facing pages core: completed in this round.
 
 ## Docker Status
 
-- `docker compose up -d --build app caddy`: success.
-- Runtime containers remain healthy and running: `app`, `caddy`, `mongodb`, `redis`.
-- Compose warning persists: duplicate compose filenames (`compose.yaml` + `docker-compose.yml`).
+- `docker compose up -d --build caddy app`: executed for frontend/backend refresh.
+- Runtime containers healthy and running: `app`, `caddy`, `mongodb`, `redis`.
+- Compose warning persists: duplicate compose file names.
 
-## API Status
+## API/Interface Status
 
-Stage 4 verification summary (`http://127.0.0.1:8084`):
+Stage 5 key checks:
 
-- `GET /sub/:token?target=clash` for inactive user -> `403 account not activated`
-- `GET /sub/:token?target=clash` for disabled user -> `403 account disabled`
-- `GET /sub/:token?target=clash` for unknown token -> `404 subscription token not found`
-- `GET /sub/:token?target=clash` for active user with converter unset -> `503 converter backend not configured`
-- All upstreams disabled then request -> `503 no enabled upstream`
+- Register flow (`/api/auth/register`): `201`
+- Login flow (`/api/auth/login`): `200`
+- Dashboard data source (`/api/auth/me`): `200`
+- Redeem flow (`/api/redeem`): `200`
+- Change password (`/api/auth/change-password`): `200`
+- Re-login with new password: `200`
 
-Stage 4 acceptance mapping:
+Page route reachability checks via Caddy:
 
-- active path reaches distribution logic: passed (returns Stage-4-specific 503 when converter unset).
-- inactive user denied: passed.
-- disabled user denied: passed.
-- disabled upstreams excluded from distribution source set: passed (no enabled upstream result).
-- token endpoint has no Turnstile dependency: passed.
-- upstream raw URLs are not exposed to users in endpoint responses: passed.
+- `/register` -> `200`
+- `/login` -> `200`
+- `/dashboard` -> `200`
+- `/redeem` -> `200`
+- `/password` -> `200`
+- `/help` -> `200`
 
 ## Task Spec Reference
 
 - Canonical task-book file: `docs/DEV_TASK.md`
-- Active milestone target: Stage 4
+- Active milestone target: Stage 5
 
 ## Changes In This Round
 
-- Added: `backend/src/routes/stage4.ts`
-- Updated: `backend/src/lib/db.ts` (subscription access log collection/index)
-- Updated: `backend/src/config/env.ts` (Stage 4 rate-limit/cache/converter timeout env)
-- Updated: `backend/src/index.ts` (mount Stage 4 route)
-- Updated: `backend/.env.example` (new Stage 4 env defaults)
-- Updated: `caddy/Caddyfile` (forward `/sub/*` to backend)
+- Added: `frontend/src/lib/api.ts`
+- Added: `frontend/src/router/index.ts`
+- Added: `frontend/src/pages/RegisterPage.vue`
+- Added: `frontend/src/pages/LoginPage.vue`
+- Added: `frontend/src/pages/DashboardPage.vue`
+- Added: `frontend/src/pages/RedeemPage.vue`
+- Added: `frontend/src/pages/PasswordPage.vue`
+- Added: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/App.vue` (layout + navigation + router view)
+- Updated: `frontend/src/main.ts` (router wiring)
 - Updated: `docs/TASK_STATE.md`
 
 ## Commands Executed In This Round
 
-- `docker compose up -d --build app caddy`
-- `curl` based Stage 4 verification:
-  - admin login
-  - create/login users
-  - `/sub/:token` for inactive/disabled/active/invalid token
-  - upstream enable/disable and re-check `/sub/:token`
+- `docker compose up -d --build caddy app`
+- `docker compose ps`
+- `curl` verification for register/login/me/redeem/change-password/re-login
+- route reachability checks for `/register /login /dashboard /redeem /password /help`
 
 ## Test Results
 
-- `/sub/:token` route is functional and no longer intercepted by SPA fallback.
-- Status guarding, rate-limit/caching wiring, enabled-upstream filtering, and converter call path are active.
-- Access log records are written for all subscription endpoint outcomes.
+- Mobile/desktop friendly multi-page UI is available via router-based routes.
+- User core actions (register/login/redeem/password change/subscription link copy entry) are reachable and API-connected.
+- Stage 5 acceptance scope achieved at MVP level.
 
 ## Next Tasks
 
-1. Stage 5 user-facing pages (register/login/dashboard/redeem/password/help) with mobile-first responsiveness.
-2. Add frontend interactions for subscription link copy and status display tied to Stage 4 endpoint.
-3. Optionally add admin read API for subscription access logs (pre-work for Stage 7 observability).
+1. Stage 6 manual rotation workflow (rotation version, confirm step, rotation logs).
+2. Add basic admin UI entry for rotation execution and result display.
+3. Prepare Stage 7 system settings and logs aggregation APIs.
 
 ## Open Issues
 
-- Converter backend is not configured in current environment, so active users currently receive `503 converter backend not configured` on `/sub/:token`.
+- Converter backend remains unconfigured in current environment, so active subscription fetch still returns `503 converter backend not configured` until configured.
 - Non-blocking compose duplicate filename warning remains.
