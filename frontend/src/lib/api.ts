@@ -1,4 +1,10 @@
-export const API_BASE = import.meta.env.VITE_APP_BASE_URL || "http://192.168.10.3:8084";
+function normalizeBaseUrl(value: string | undefined) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/\/+$/, "");
+}
+
+export const API_BASE = normalizeBaseUrl(import.meta.env.VITE_APP_BASE_URL) || window.location.origin;
 
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {

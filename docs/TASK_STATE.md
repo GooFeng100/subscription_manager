@@ -6,6 +6,112 @@
 
 ## Round Goal
 
+修复生产站点前端在 HTTPS 页面下仍请求 NAS 本地 `http://192.168.10.3:8084/config` 的 Mixed Content / CORS 问题，并准备上传代码。
+
+## Project Current Status
+
+- `frontend/src/lib/api.ts` 已改为优先使用 `VITE_APP_BASE_URL`，否则回退到 `window.location.origin`，避免生产页面继续请求 NAS 本地地址。
+- 前端已重新构建，代码层修复已完成。
+- 本地发布 commit 已生成，但当前远端推送仍受 GitHub SSH/HTTPS 鉴权与连接问题阻塞，尚未完成远端上传。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/lib/api.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' .codex/skills/subscription-manager-project/SKILL.md`
+- `sed -n '1,220p' frontend/src/lib/public-config.ts`
+- `sed -n '1,220p' frontend/src/main.ts`
+- `sed -n '1,260p' frontend/src/pages/LoginPage.vue`
+- `sed -n '1,220p' frontend/src/lib/auth-request.ts`
+- `sed -n '1,220p' frontend/src/lib/api.ts`
+- `grep -RIn "VITE_APP_BASE_URL\\|API_BASE" frontend/src`
+- `npm run build --prefix frontend`
+- `git push origin master`
+- `ssh -T -o BatchMode=yes git@github.com`
+- `ssh -T -p 443 -o BatchMode=yes git@ssh.github.com`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- `/config` 的前端请求基址策略已修正为同源优先；后端接口未变更。
+
+## Validation Result
+
+- `frontend` 构建通过。
+- 本地代码修复已完成。
+- 远端推送仍失败于 GitHub 连接/鉴权阶段。
+
+## Notes / Blockers
+
+- GitHub SSH 连接被远端关闭。
+- HTTPS push 缺少可用用户名/令牌。
+
+## Next Step
+
+- 等待可用的 GitHub 推送通道，或在可用环境中重试 `git push origin master`。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
+排查生产站点登录页请求本地 NAS 地址导致的 Mixed Content / CORS 问题，并修正前端接口基址策略。
+
+## Project Current Status
+
+- 生产环境中前端仍在请求 `http://192.168.10.3:8084/config`，与正式域名 `https://sub.889100.xyz` 不一致，触发 Mixed Content 与 CORS 拦截。
+- 根因已确认：`frontend/src/lib/api.ts` 将 `API_BASE` 默认写死为 NAS 本地地址。
+- 已改为“优先使用 `VITE_APP_BASE_URL`，否则回退到 `window.location.origin`”，使生产环境自动同源请求。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/lib/api.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' .codex/skills/subscription-manager-project/SKILL.md`
+- `sed -n '1,220p' frontend/src/lib/public-config.ts`
+- `sed -n '1,220p' frontend/src/main.ts`
+- `sed -n '1,260p' frontend/src/pages/LoginPage.vue`
+- `sed -n '1,220p' frontend/src/lib/auth-request.ts`
+- `sed -n '1,220p' frontend/src/lib/api.ts`
+- `grep -RIn "VITE_APP_BASE_URL\\|API_BASE" frontend/src`
+- `npm run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- `/config` 的请求路径策略已修正为同源优先；后端接口本身未变更。
+
+## Validation Result
+
+- `frontend` 构建通过。
+
+## Notes / Blockers
+
+- 生产环境需要重新部署前端静态资源，使新构建产物生效。
+
+## Next Step
+
+- 重新发布前端静态资源并在正式域名下复测登录页 `/config` 请求是否已变为同源 HTTPS。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
 修正 `scripts/nas-release.sh` 的发布确认交互，允许小写 `yes` 继续发布。
 
 ## Project Current Status
