@@ -24,7 +24,11 @@
         autocomplete="new-password"
         :icon-src="passwordIcon"
       />
-      <div class="turnstile-placeholder">[Cloudflare Turnstile 验证区域]</div>
+      <TurnstileWidget
+        v-if="turnstileEnabled && turnstileSiteKey"
+        v-model="turnstileToken"
+        :site-key="turnstileSiteKey"
+      />
       <LoadingButton
         :loading="loading"
         :disabled="!username || !password || !confirmPassword || password !== confirmPassword"
@@ -41,12 +45,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import AuthLayout from '../components/auth/AuthLayout.vue';
 import FormField from '../components/ui/FormField.vue';
 import LoadingButton from '../components/ui/LoadingButton.vue';
-import { api } from '../lib/api';
+import TurnstileWidget from '../components/auth/TurnstileWidget.vue';
+import { postAuthJson } from '../lib/auth-request';
+import { getPublicConfig } from '../lib/public-config';
 import { validatePassword, validateUsername } from '../lib/validators';
 import usernameIcon from '../assets/icons/username.png';
 import passwordIcon from '../assets/icons/password.png';
@@ -58,6 +64,34 @@ const confirmPassword = ref('');
 const loading = ref(false);
 const msg = ref('');
 const msgType = ref<'ok' | 'err' | ''>('');
+const turnstileEnabled = ref(false);
+const turnstileSiteKey = ref('');
+const turnstileToken = ref('');
+
+const turnstileRequired = computed(() => turnstileEnabled.value && Boolean(turnstileSiteKey.value));
+
+function clearMessage() {
+  if (!msg.value) return;
+  msg.value = '';
+  msgType.value = '';
+}
+
+watch([username, password, confirmPassword, turnstileToken], () => {
+  if (msgType.value === 'err') {
+    clearMessage();
+  }
+});
+
+async function loadPublicConfig() {
+  try {
+    const config = await getPublicConfig();
+    turnstileEnabled.value = !!config.turnstileEnabled;
+    turnstileSiteKey.value = String(config.turnstileSiteKey || '').trim();
+  } catch {
+    turnstileEnabled.value = false;
+    turnstileSiteKey.value = '';
+  }
+}
 
 async function submit() {
   if (!username.value || !password.value || !confirmPassword.value || loading.value) return;
@@ -70,44 +104,46 @@ async function submit() {
     msgType.value = 'err';
     return;
   }
+  if (turnstileRequired.value && !turnstileToken.value) {
+    msg.value = '请先完成 Turnstile 验证';
+    msgType.value = 'err';
+    return;
+  }
   loading.value = true;
-  msg.value = '';
-  msgType.value = '';
+  clearMessage();
+
+  const result = await postAuthJson('register', '/api/auth/register', {
+    username: username.value.trim(),
+    password: password.value,
+    turnstileToken: turnstileToken.value || undefined
+  });
+  if (!result.ok) {
+    msg.value = result.message;
+    msgType.value = 'err';
+    loading.value = false;
+    return;
+  }
 
   try {
-    await api('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ username: username.value, password: password.value })
-    });
     msg.value = '注册成功，正在跳转登录页...';
     msgType.value = 'ok';
     setTimeout(() => {
       void router.push('/login');
     }, 500);
-  } catch (e) {
-    msg.value = (e as Error).message;
-    msgType.value = 'err';
   } finally {
     loading.value = false;
   }
 }
+
+onMounted(() => {
+  void loadPublicConfig();
+});
 </script>
 
 <style scoped>
 .form {
   display: grid;
   gap: 12px;
-}
-
-.turnstile-placeholder {
-  min-height: 44px;
-  border: 1px solid #dde1eb;
-  border-radius: 8px;
-  background: #f1f3fa;
-  color: #475569;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
 }
 
 .divider {
@@ -142,5 +178,16 @@ async function submit() {
   color: #1d4ed8;
   text-decoration: none;
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .msg,
+  .switch {
+    font-size: 14px;
+  }
+
+  .divider {
+    margin-top: 4px;
+  }
 }
 </style>

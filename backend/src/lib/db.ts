@@ -7,7 +7,9 @@ export type UserDoc = {
   _id?: ObjectId;
   username: string;
   password_hash: string;
-  sub_token: string;
+  contact?: string | null;
+  note?: string | null;
+  sub_token: string | null;
   status: UserStatus;
   expire_at: Date | null;
   disable_after: Date | null;
@@ -78,11 +80,15 @@ export type UpstreamDoc = {
   _id?: ObjectId;
   name: string;
   provider: string;
+  source_type: string;
   source_url: string;
   enabled: boolean;
   last_test_ok: boolean | null;
   last_test_status: number | null;
   last_test_error: string | null;
+  last_test_type?: string | null;
+  last_test_node_count?: number | null;
+  last_test_message?: string | null;
   last_test_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -175,7 +181,19 @@ export function systemStateCol() {
 
 export async function ensureIndexes() {
   await usersCol().createIndex({ username: 1 }, { unique: true });
-  await usersCol().createIndex({ sub_token: 1 }, { unique: true });
+  const userIndexes = await usersCol().indexes();
+  const legacySubTokenIndex = userIndexes.find((idx) => idx.name === "sub_token_1");
+  if (legacySubTokenIndex && !legacySubTokenIndex.partialFilterExpression) {
+    await usersCol().dropIndex("sub_token_1");
+  }
+  await usersCol().createIndex(
+    { sub_token: 1 },
+    {
+      name: "sub_token_1",
+      unique: true,
+      partialFilterExpression: { sub_token: { $type: "string" } }
+    }
+  );
   await adminsCol().createIndex({ username: 1 }, { unique: true });
   await authLogsCol().createIndex({ created_at: 1 });
   await authLogsCol().createIndex({ username: 1, created_at: 1 });

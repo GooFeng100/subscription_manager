@@ -36,8 +36,8 @@ defineProps<{
   border: 1px solid #d0d5dd;
   border-radius: 10px;
   width: 100%;
-  max-width: 590px;
-  padding: 20px 18px 16px;
+  max-width: 420px;
+  padding: 16px 14px 14px;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
   overflow: hidden;
 }
@@ -70,6 +70,31 @@ h1 {
 @media (min-width: 768px) {
   .auth-shell {
     padding-top: 26px;
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-shell {
+    padding: 12px 10px;
+  }
+
+  .auth-card {
+    padding: 16px 12px 14px;
+    border-radius: 12px;
+  }
+
+  .logo-mark {
+    width: 84px;
+    height: 84px;
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-size: clamp(20px, 6vw, 28px);
+  }
+
+  .divider {
+    margin: 16px 0 12px;
   }
 }
 </style>

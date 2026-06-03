@@ -9,8 +9,11 @@ const router = Router();
 const settingsUpdateSchema = z.object({
   registration_enabled: z.boolean().optional(),
   converter_backend_url: z.string().optional(),
+  converter_default_target: z.string().optional(),
+  converter_default_config_url: z.string().optional(),
+  subscription_filename_template: z.string().optional(),
+  upstream_poll_interval_minutes: z.number().int().nonnegative().optional(),
   sub_rate_limit_per_minute: z.number().int().positive().optional(),
-  sub_cache_seconds: z.number().int().positive().optional(),
   login_fail_limit: z.number().int().positive().optional(),
   login_lock_minutes: z.number().int().positive().optional(),
   register_ip_limit: z.number().int().positive().optional(),
@@ -18,10 +21,7 @@ const settingsUpdateSchema = z.object({
   turnstile_enabled: z.boolean().optional(),
   login_turnstile_enabled: z.boolean().optional(),
   register_turnstile_enabled: z.boolean().optional(),
-  redeem_turnstile_enabled: z.boolean().optional(),
-  site_domain: z.string().optional(),
-  turnstile_site_key: z.string().optional(),
-  turnstile_secret_key: z.string().optional()
+  site_domain: z.string().optional()
 });
 
 const authLogsQuerySchema = z.object({

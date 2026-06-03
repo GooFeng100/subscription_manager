@@ -12,6 +12,7 @@ import stage7Router from "./routes/stage7.js";
 import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
 import { getRuntimeSettings } from "./lib/runtime-settings.js";
+import { startUpstreamAutoPolling } from "./services/upstream-poller.js";
 
 async function bootstrap() {
   await connectDb();
@@ -75,7 +76,7 @@ async function bootstrap() {
       appBaseUrl: settings.site_domain || env.APP_BASE_URL,
       nodeEnv: env.NODE_ENV,
       turnstileEnabled: settings.turnstile_enabled,
-      turnstileSiteKey: settings.turnstile_site_key
+      turnstileSiteKey: env.TURNSTILE_SITE_KEY || ""
     });
   });
 
@@ -89,6 +90,8 @@ async function bootstrap() {
   app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`subscription-manager-backend listening on ${env.PORT}`);
   });
+
+  startUpstreamAutoPolling();
 }
 
 bootstrap().catch((error) => {

@@ -5,7 +5,6 @@
         <h1>轮换管理</h1>
         <p class="sub">执行订阅版本轮换，查看执行记录与影响范围。</p>
       </div>
-      <span class="badge" v-if="usingMock">演示日志 {{ logs.length }} 条</span>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -60,7 +59,6 @@
         <table class="table">
           <thead>
             <tr>
-              <th>计划编号</th>
               <th>计划名称</th>
               <th>执行周期</th>
               <th>下次执行</th>
@@ -70,22 +68,21 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(job, idx) in scheduleItems" :key="job.id">
-              <td class="mono">J{{ String(idx + 1).padStart(3, '0') }}</td>
+            <tr v-for="job in scheduleItems" :key="job.id">
               <td>{{ job.name }}</td>
               <td>{{ job.cron_desc }}</td>
               <td>{{ job.next_run_at }}</td>
-              <td><span class="status" :class="job.enabled ? 'is-ok' : 'is-disabled'">{{ job.enabled ? '启用' : '停用' }}</span></td>
+              <td><span class="status" :class="jobStatusClass(job)">{{ jobStatusText(job) }}</span></td>
               <td>{{ job.note || '-' }}</td>
               <td>
                 <div class="actions">
-                  <button type="button" @click="toggleSchedule(job)">{{ job.enabled ? '停用' : '启用' }}</button>
+                  <button type="button" :disabled="job.locked || job.status === 'expired'" @click="toggleSchedule(job)">{{ toggleScheduleText(job) }}</button>
                   <button type="button" class="danger" @click="openScheduleDelete(job)">删除</button>
                 </div>
               </td>
             </tr>
             <tr v-if="scheduleItems.length === 0" class="empty-row">
-              <td colspan="7">暂无定时轮换计划</td>
+              <td colspan="6">暂无定时轮换计划</td>
             </tr>
           </tbody>
         </table>
@@ -108,7 +105,7 @@
         <table class="table">
           <thead>
             <tr>
-              <th>日志编号</th>
+              <th>时间</th>
               <th>版本变更</th>
               <th>轮换原因</th>
               <th>执行人</th>
@@ -117,8 +114,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(log, idx) in filteredLogs" :key="log.id">
-              <td class="mono">R{{ String(idx + 1).padStart(3, '0') }}</td>
+            <tr v-for="log in filteredLogs" :key="log.id">
+              <td>{{ fmtDateTime(log.created_at) }}</td>
               <td class="mono">{{ log.from_version }} → {{ log.to_version === null ? 'FAILED' : log.to_version }}</td>
               <td>{{ log.reason || '-' }}</td>
               <td>{{ log.operator_username || '-' }}</td>
@@ -199,6 +196,7 @@ type RotationStatus = {
 
 type RotationLog = {
   id: string;
+  created_at: string;
   from_version: string;
   to_version: string | null;
   reason: string;
@@ -210,17 +208,18 @@ type RotationLog = {
 type RotationSchedule = {
   id: string;
   name: string;
+  mode: "once" | "monthly";
+  once_date: string | null;
+  day_of_month: number | null;
+  hour: number;
+  minute: number;
   cron_desc: string;
   next_run_at: string;
   enabled: boolean;
+  locked?: boolean;
+  status?: "enabled" | "disabled" | "expired";
   note?: string;
 };
-
-const mockLogs: RotationLog[] = [
-  { id: 'r1', from_version: '26.6.1', to_version: '26.6.2', reason: '上游A异常', operator_username: 'admin', impacted_user_count: 58, success: true },
-  { id: 'r2', from_version: '26.6.2', to_version: null, reason: '手动校验失败', operator_username: 'admin', impacted_user_count: 58, success: false },
-  { id: 'r3', from_version: '26.6.2', to_version: '26.6.3', reason: '恢复执行', operator_username: 'ops01', impacted_user_count: 61, success: true }
-];
 
 const status = ref<RotationStatus | null>(null);
 const logs = ref<RotationLog[]>([]);
@@ -230,16 +229,12 @@ const confirmText = ref('');
 const msg = ref('');
 const msgType = ref<'ok' | 'bad' | ''>('');
 const error = ref('');
-const usingMock = ref(false);
 const qReason = ref('');
 const qResult = ref('');
 const scheduleOpen = ref(false);
 const scheduleDeleteOpen = ref(false);
 const scheduleDeleteTarget = ref<RotationSchedule | null>(null);
-const scheduleItems = ref<RotationSchedule[]>([
-  { id: "job-1", name: "每日凌晨轮换", cron_desc: "每天 03:00", next_run_at: "2026-06-03", enabled: true, note: "主任务" },
-  { id: "job-2", name: "周日兜底轮换", cron_desc: "每周日 04:00", next_run_at: "2026-06-07", enabled: false, note: "兜底" }
-]);
+const scheduleItems = ref<RotationSchedule[]>([]);
 const scheduleForm = ref({
   name: "",
   mode: "once" as "once" | "monthly",
@@ -260,26 +255,14 @@ async function refresh() {
   try {
     status.value = await api<RotationStatus>('/api/admin/rotation/status');
     const data = await api<{ items: RotationLog[] }>('/api/admin/rotation/logs');
-    if (data.items?.length) {
-      logs.value = data.items;
-      usingMock.value = false;
-    } else {
-      logs.value = mockLogs;
-      usingMock.value = true;
-    }
+    logs.value = data.items || [];
     msg.value = '状态已刷新';
     msgType.value = 'ok';
   } catch (e) {
-    error.value = `接口读取失败，已切换演示日志：${(e as Error).message}`;
-    status.value = {
-      sub_version: '26.6.3',
-      active_user_count: 61,
-      enabled_upstream_count: 2,
-      confirm_text: 'ROTATE'
-    };
-    logs.value = mockLogs;
-    usingMock.value = true;
-    msg.value = '已切换演示数据';
+    error.value = `接口读取失败：${(e as Error).message}`;
+    status.value = null;
+    logs.value = [];
+    msg.value = '读取失败';
     msgType.value = 'bad';
   }
 }
@@ -305,42 +288,51 @@ function openScheduleAdd() {
   scheduleOpen.value = true;
 }
 
-function submitScheduleAdd() {
+async function submitScheduleAdd() {
   const name = scheduleForm.value.name.trim();
   if (!name) return;
   const hh = String(Math.min(23, Math.max(0, Number(scheduleForm.value.hour) || 0))).padStart(2, "0");
   const mm = String(Math.min(59, Math.max(0, Number(scheduleForm.value.minute) || 0))).padStart(2, "0");
   const day = Math.min(31, Math.max(1, Number(scheduleForm.value.dayOfMonth) || 1));
   if (scheduleForm.value.mode === "once" && !scheduleForm.value.onceDate) return;
-  const cronDesc = scheduleForm.value.mode === "once"
-    ? `指定 ${scheduleForm.value.onceDate} ${hh}:${mm}`
-    : `每月 ${day} 日 ${hh}:${mm}`;
-  const nextRunAt = calcNextRunAt(scheduleForm.value.mode, scheduleForm.value.onceDate, day, hh, mm);
-  scheduleItems.value.unshift({
-    id: `job-${Date.now()}`,
-    name,
-    cron_desc: cronDesc,
-    next_run_at: nextRunAt,
-    enabled: true,
-    note: scheduleForm.value.note.trim()
-  });
-  scheduleOpen.value = false;
+  try {
+    await api('/api/admin/rotation/schedules', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        mode: scheduleForm.value.mode,
+        once_date: scheduleForm.value.mode === 'once' ? scheduleForm.value.onceDate : null,
+        day_of_month: scheduleForm.value.mode === 'monthly' ? day : null,
+        hour: Number(hh),
+        minute: Number(mm),
+        note: scheduleForm.value.note.trim() || null
+      })
+    });
+    await loadSchedules();
+    scheduleOpen.value = false;
+  } catch (e) {
+    error.value = `新增计划失败：${(e as Error).message}`;
+  }
 }
 
-function calcNextRunAt(mode: "once" | "monthly", onceDate: string, day: number, hh: string, mm: string) {
-  if (mode === "once") return `${onceDate} ${hh}:${mm}`;
-  const now = new Date();
-  let next = new Date(now.getFullYear(), now.getMonth(), Math.min(day, 28), Number(hh), Number(mm), 0, 0);
-  if (next <= now) next = new Date(now.getFullYear(), now.getMonth() + 1, Math.min(day, 28), Number(hh), Number(mm), 0, 0);
-  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")} ${hh}:${mm}`;
+async function loadSchedules() {
+  try {
+    const res = await api<{ items: RotationSchedule[] }>('/api/admin/rotation/schedules');
+    scheduleItems.value = res.items || [];
+  } catch (e) {
+    error.value = `读取定时计划失败：${(e as Error).message}`;
+    scheduleItems.value = [];
+  }
 }
 
-function toggleSchedule(job: RotationSchedule) {
-  scheduleItems.value = scheduleItems.value.map((x) => (x.id === job.id ? { ...x, enabled: !x.enabled } : x));
-}
-
-function removeSchedule(id: string) {
-  scheduleItems.value = scheduleItems.value.filter((x) => x.id !== id);
+async function toggleSchedule(job: RotationSchedule) {
+  if (job.locked || job.status === 'expired') return;
+  try {
+    await api(`/api/admin/rotation/schedules/${job.id}/toggle`, { method: 'POST' });
+    await loadSchedules();
+  } catch (e) {
+    error.value = `更新计划状态失败：${(e as Error).message}`;
+  }
 }
 
 function openScheduleDelete(job: RotationSchedule) {
@@ -348,15 +340,44 @@ function openScheduleDelete(job: RotationSchedule) {
   scheduleDeleteOpen.value = true;
 }
 
-function submitScheduleDelete() {
+function fmtDateTime(value: string | null | undefined) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function jobStatusText(job: RotationSchedule) {
+  if (job.status === 'expired' || job.locked) return '已过期';
+  if (job.enabled) return '启用';
+  return '停用';
+}
+
+function jobStatusClass(job: RotationSchedule) {
+  if (job.status === 'expired' || job.locked) return 'is-bad';
+  return job.enabled ? 'is-ok' : 'is-disabled';
+}
+
+function toggleScheduleText(job: RotationSchedule) {
+  if (job.status === 'expired' || job.locked) return '已过期';
+  return job.enabled ? '停用' : '启用';
+}
+
+async function submitScheduleDelete() {
   if (!scheduleDeleteTarget.value) return;
-  removeSchedule(scheduleDeleteTarget.value.id);
-  scheduleDeleteOpen.value = false;
-  scheduleDeleteTarget.value = null;
+  try {
+    await api(`/api/admin/rotation/schedules/${scheduleDeleteTarget.value.id}`, { method: 'DELETE' });
+    await loadSchedules();
+    scheduleDeleteOpen.value = false;
+    scheduleDeleteTarget.value = null;
+  } catch (e) {
+    error.value = `删除计划失败：${(e as Error).message}`;
+  }
 }
 
 onMounted(async () => {
   await refresh();
+  await loadSchedules();
 });
 </script>
 
@@ -411,6 +432,8 @@ th { color: #64748b; font-weight: 600; background: #f8fafc; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actions button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.2; min-width: 52px; cursor: pointer; }
 .actions button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.actions button:disabled { border-color: #e5e7eb; color: #9ca3af; background: #f9fafb; cursor: not-allowed; box-shadow: none; }
+.actions button:disabled:hover { border-color: #e5e7eb; color: #9ca3af; background: #f9fafb; box-shadow: none; }
 .actions .danger { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
 
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 60; }

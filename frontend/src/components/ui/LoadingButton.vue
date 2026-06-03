@@ -41,4 +41,11 @@ withDefaults(
 .btn.busy {
   filter: saturate(0.8);
 }
+
+@media (max-width: 640px) {
+  .btn {
+    min-height: 48px;
+    font-size: 16px;
+  }
+}
 </style>

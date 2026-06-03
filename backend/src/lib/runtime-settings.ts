@@ -7,9 +7,14 @@ const SETTINGS_KEY = "runtime_settings";
 
 const runtimeSettingsSchema = z.object({
   registration_enabled: z.boolean().default(boolFromEnv(env.REGISTRATION_ENABLED, true)),
-  converter_backend_url: z.string().default(env.CONVERTER_BACKEND_URL || ""),
+  converter_backend_url: z.string().default(env.CONVERTER_BACKEND_URL || "http://subconverter:25500/sub"),
+  converter_default_target: z.string().default("clash"),
+  converter_default_config_url: z
+    .string()
+    .default("https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini"),
+  subscription_filename_template: z.string().default("{{username}}_V{{version}}"),
+  upstream_poll_interval_minutes: z.number().int().nonnegative().default(env.UPSTREAM_POLL_INTERVAL_MINUTES),
   sub_rate_limit_per_minute: z.number().int().positive().default(env.SUB_RATE_LIMIT_PER_MINUTE),
-  sub_cache_seconds: z.number().int().positive().default(env.SUB_CACHE_SECONDS),
   login_fail_limit: z.number().int().positive().default(env.LOGIN_FAIL_LIMIT),
   login_lock_minutes: z.number().int().positive().default(env.LOGIN_LOCK_MINUTES),
   register_ip_limit: z.number().int().positive().default(env.REGISTER_IP_LIMIT),
@@ -17,10 +22,7 @@ const runtimeSettingsSchema = z.object({
   turnstile_enabled: z.boolean().default(boolFromEnv(env.TURNSTILE_ENABLED, false)),
   login_turnstile_enabled: z.boolean().default(boolFromEnv(env.LOGIN_TURNSTILE_ENABLED, true)),
   register_turnstile_enabled: z.boolean().default(boolFromEnv(env.REGISTER_TURNSTILE_ENABLED, true)),
-  redeem_turnstile_enabled: z.boolean().default(boolFromEnv(env.REDEEM_TURNSTILE_ENABLED, true)),
-  site_domain: z.string().default(env.APP_BASE_URL),
-  turnstile_site_key: z.string().default(env.TURNSTILE_SITE_KEY || ""),
-  turnstile_secret_key: z.string().default(env.TURNSTILE_SECRET_KEY || "")
+  site_domain: z.string().default(env.APP_BASE_URL)
 });
 
 export type RuntimeSettings = z.infer<typeof runtimeSettingsSchema>;

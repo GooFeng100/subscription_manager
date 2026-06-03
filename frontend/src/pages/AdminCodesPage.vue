@@ -5,7 +5,6 @@
         <h1>授权码管理</h1>
         <p class="sub">授权码生成、使用状态与作废删除管理。</p>
       </div>
-      <span class="badge" v-if="usingMock">演示数据 6 条</span>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -20,7 +19,6 @@
       <table class="table">
         <thead>
           <tr>
-            <th>授权码编号</th>
             <th>授权码</th>
             <th>授权天数</th>
             <th>创建日期</th>
@@ -32,15 +30,14 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(c, idx) in filteredItems" :key="c.id">
-            <td class="mono">C{{ String(idx + 1).padStart(3, '0') }}</td>
+          <tr v-for="c in filteredItems" :key="c.id">
             <td>
               <button class="copy-code" type="button" @click="copyCode(c.code)">{{ c.code }}</button>
             </td>
             <td>{{ c.days }}</td>
             <td>{{ fmtDay(c.created_at) }}</td>
             <td>{{ fmtDay(c.used_at) }}</td>
-            <td>{{ c.used_by || '-' }}</td>
+            <td>{{ c.used_by_username || '-' }}</td>
             <td><span class="status" :class="statusClass(c.status)">{{ statusLabel(c.status) }}</span></td>
             <td>{{ c.note || '-' }}</td>
             <td>
@@ -51,7 +48,7 @@
             </td>
           </tr>
           <tr v-if="filteredItems.length === 0" class="empty-row">
-            <td colspan="9">暂无授权码数据</td>
+            <td colspan="8">暂无授权码数据</td>
           </tr>
         </tbody>
       </table>
@@ -123,31 +120,32 @@ type Item = {
   code: string;
   days: number;
   status: 'unused' | 'used' | 'revoked' | string;
-  used_by: string | null;
+  used_by_username: string | null;
   used_at: string | null;
   created_at: string;
   note?: string | null;
 };
-
-function genCode() {
-  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  let s = '';
-  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-}
-
-const mockItems: Item[] = [
-  { id: 'c1', code: genCode(), days: 30, status: 'unused', used_by: null, used_at: null, created_at: '2026-06-01', note: '促销批次A' },
-  { id: 'c2', code: genCode(), days: 90, status: 'used', used_by: 'alice', used_at: '2026-05-30', created_at: '2026-05-10', note: 'VIP用户' },
-  { id: 'c3', code: genCode(), days: 180, status: 'revoked', used_by: null, used_at: null, created_at: '2026-05-12', note: '误发作废' },
-  { id: 'c4', code: genCode(), days: 365, status: 'unused', used_by: null, used_at: null, created_at: '2026-05-25', note: '年卡' },
-  { id: 'c5', code: genCode(), days: 30, status: 'used', used_by: 'bob', used_at: '2026-05-28', created_at: '2026-05-20', note: '' },
-  { id: 'c6', code: genCode(), days: 60, status: 'unused', used_by: null, used_at: null, created_at: '2026-06-01', note: '新批次' }
-];
+type ApiCodeItem = {
+  id: string;
+  code: string;
+  duration_days: number;
+  status: 'unused' | 'used' | 'revoked' | string;
+  used_by_username: string | null;
+  used_at: string | null;
+  created_at: string;
+  note?: string | null;
+};
+type CreateCodeResponse = {
+  items: Array<{
+    code: string;
+    duration_days: number;
+    grace_days: number;
+    status: string;
+  }>;
+};
 
 const items = ref<Item[]>([]);
 const error = ref('');
-const usingMock = ref(false);
 const copyMsg = ref('');
 const qCode = ref('');
 const qUser = ref('');
@@ -164,9 +162,22 @@ const confirmOpen = ref(false);
 const confirmMode = ref<'revoke' | 'delete'>('revoke');
 const selectedCode = ref<Item | null>(null);
 
+function normalizeCodeItem(i: ApiCodeItem): Item {
+  return {
+    id: i.id,
+    code: i.code,
+    days: i.duration_days,
+    status: i.status,
+    used_by_username: i.used_by_username,
+    used_at: i.used_at,
+    created_at: i.created_at,
+    note: i.note ?? null
+  };
+}
+
 const filteredItems = computed(() => items.value.filter((c) => {
   const okCode = qCode.value ? c.code.toLowerCase().includes(qCode.value.toLowerCase()) : true;
-  const okUser = qUser.value ? (c.used_by || '').toLowerCase().includes(qUser.value.toLowerCase()) : true;
+  const okUser = qUser.value ? (c.used_by_username || '').toLowerCase().includes(qUser.value.toLowerCase()) : true;
   return okCode && okUser;
 }));
 
@@ -193,8 +204,8 @@ function statusLabel(status: string) {
 }
 
 async function copyCode(code: string) {
-  try { await navigator.clipboard.writeText(code); copyMsg.value = `已复制：${code}`; }
-  catch { copyMsg.value = '复制失败，请手动复制'; }
+  const copied = await copyText(code);
+  copyMsg.value = copied ? `已复制：${code}` : '复制失败，请手动复制';
 }
 
 function openCreate() {
@@ -213,23 +224,16 @@ async function submitCreate() {
   const note = createNote.value.trim();
 
   try {
-    // 若后端支持批量参数可直接生效，否则回退前端演示生成
-    await api('/api/admin/codes', { method: 'POST', body: JSON.stringify({ count, days, note }) });
-    const latest = await api<{ items: Item[] }>('/api/admin/codes');
-    items.value = (latest.items || []).map((i) => ({ ...i, code: (i.code || genCode()).slice(0, 6).toUpperCase() }));
-    createdCodes.value = items.value.slice(0, count).map((i) => i.code);
-  } catch {
-    const now = fmtDay(new Date().toISOString());
-    const created: Item[] = [];
-    const codes: string[] = [];
-    for (let i = 0; i < count; i++) {
-      const c = genCode();
-      codes.push(c);
-      created.push({ id: `mock-new-${Date.now()}-${i}`, code: c, days, status: 'unused', used_by: null, used_at: null, created_at: now, note });
-    }
-    items.value = [...created, ...items.value];
-    createdCodes.value = codes;
-    usingMock.value = true;
+    const created = await api<CreateCodeResponse>('/api/admin/codes', {
+      method: 'POST',
+      body: JSON.stringify({ count, durationDays: days, graceDays: 3, note })
+    });
+    const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
+    items.value = (latest.items || []).map(normalizeCodeItem);
+    createdCodes.value = (created.items || []).map((i) => i.code);
+  } catch (e) {
+    error.value = `生成失败：${(e as Error).message}`;
+    return;
   }
 
   createOpen.value = false;
@@ -238,12 +242,39 @@ async function submitCreate() {
 }
 
 async function copyAllCreated() {
-  try {
-    await navigator.clipboard.writeText(createdCodes.value.join('\n'));
-    copyMsg.value = '已复制全部授权码';
-  } catch {
-    copyMsg.value = '复制失败，请手动复制';
+  const copied = await copyText(createdCodes.value.join('\n'));
+  copyMsg.value = copied ? '已复制全部授权码' : '复制失败，请手动复制';
+  if (copied) successOpen.value = false;
+}
+
+async function copyText(text: string) {
+  if (!text) return false;
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the textarea method for HTTP/NAS browser contexts.
+    }
   }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  }
+  document.body.removeChild(textarea);
+  return copied;
 }
 
 function openRevoke(c: Item) {
@@ -271,18 +302,13 @@ async function submitConfirm() {
   try {
     if (confirmMode.value === 'revoke') {
       await api(`/api/admin/codes/${target.id}/revoke`, { method: 'POST' });
-      items.value = items.value.map((i) => (i.id === target.id ? { ...i, status: 'revoked' } : i));
     } else {
       await api(`/api/admin/codes/${target.id}`, { method: 'DELETE' });
-      items.value = items.value.filter((i) => i.id !== target.id);
     }
-  } catch {
-    // 本地回退
-    if (confirmMode.value === 'revoke') {
-      items.value = items.value.map((i) => (i.id === target.id ? { ...i, status: 'revoked' } : i));
-    } else {
-      items.value = items.value.filter((i) => i.id !== target.id);
-    }
+    const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
+    items.value = (latest.items || []).map(normalizeCodeItem);
+  } catch (e) {
+    error.value = `操作失败：${(e as Error).message}`;
   }
 
   confirmOpen.value = false;
@@ -291,17 +317,11 @@ async function submitConfirm() {
 
 onMounted(async () => {
   try {
-    const data = await api<{ items: Item[] }>('/api/admin/codes');
-    if (data.items?.length) {
-      items.value = data.items.map((i) => ({ ...i, code: (i.code || genCode()).slice(0, 6).toUpperCase() }));
-      return;
-    }
-    items.value = mockItems;
-    usingMock.value = true;
+    const data = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
+    items.value = (data.items || []).map(normalizeCodeItem);
   } catch (e) {
-    error.value = `接口读取失败，已切换演示数据：${(e as Error).message}`;
-    items.value = mockItems;
-    usingMock.value = true;
+    error.value = `接口读取失败：${(e as Error).message}`;
+    items.value = [];
   }
 });
 </script>
@@ -326,11 +346,14 @@ th { color: #64748b; font-weight: 600; background: #f8fafc; }
 
 tbody tr { transition: background-color 0.16s ease; }
 tbody tr:hover { background: #f3f7ff; }
-tbody tr:has(.actions button:hover) { background: #edf4ff; }
+tbody tr:has(.actions button:hover),
+tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
 
-.copy-code { border: 1px dashed #93c5fd; background: #eff6ff; color: #1d4ed8; border-radius: 8px; padding: 4px 8px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; cursor: pointer; }
+.copy-code { border: 1px dashed #93c5fd; background: #eff6ff; color: #1d4ed8; border-radius: 8px; padding: 4px 8px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; cursor: pointer; transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease; }
+.copy-code:hover { border-style: solid; border-color: #2563eb; background: #dbeafe; color: #1e40af; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+.copy-code:active { transform: translateY(1px) scale(0.98); background: #bfdbfe; }
 .copy-msg { margin: 8px 0 0; color: #0f766e; font-size: 12px; }
 
 .status { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
@@ -360,10 +383,11 @@ tbody tr:has(.actions button:hover) { background: #edf4ff; }
 .day-quick button.active { border-color: #2563eb; background: #2563eb; color: #fff; }
  .day-quick button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
 .modal textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
-.modal-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
+.modal-actions { box-sizing: border-box; margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 14px; }
 .modal-foot { margin-top: 0; border-top: 1px solid #e2e8f0; padding: 12px 16px; background: #f8faff; }
-.modal-actions button { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.modal-actions button { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; padding: 8px 12px; cursor: pointer; min-width: 88px; max-width: 140px; white-space: nowrap; transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease; }
 .modal-actions button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.modal-actions button:active { transform: translateY(1px) scale(0.98); }
 .modal-actions .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff !important; }
 .modal-actions .add-btn:hover { background: #1d4ed8 !important; color: #fff !important; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
 .modal-actions .warn { border-color: #fcd34d; color: #92400e; background: #fffbeb; }
@@ -378,7 +402,7 @@ tbody tr:has(.actions button:hover) { background: #edf4ff; }
 }
 .confirm-modal .modal-actions {
   box-sizing: border-box;
-  padding: 0 16px 12px;
+  padding: 0 16px 14px;
 }
 .confirm-modal .modal-actions button {
   min-width: 64px;

@@ -5,7 +5,6 @@
         <h1>用户管理</h1>
         <p class="sub">用户状态、到期时间、续期和禁用管理。</p>
       </div>
-      <span class="badge" v-if="usingMock">演示数据 6 条</span>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -40,8 +39,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(u, idx) in filteredItems" :key="u.id">
-            <td class="mono">U{{ String(idx + 1).padStart(3, '0') }}</td>
+          <tr v-for="u in filteredItems" :key="u.id">
+            <td class="mono">{{ u.id }}</td>
             <td class="user">{{ u.username }}</td>
             <td>{{ u.contact || '-' }}</td>
             <td>
@@ -228,17 +227,8 @@ type Item = {
   created_at: string;
 };
 
-const mockUsers: Item[] = [
-  { id: 'mock-1', username: 'alice', contact: 'alice@example.com', note: '企业账号', status: 'active', expire_at: '2026-12-30', disable_after: '2027-01-06', sub_token: 'subtk_a1b2c3d4e5f6g7h8', created_at: '2026-05-10' },
-  { id: 'mock-2', username: 'bob', contact: '138****1001', note: '促销批次', status: 'grace', expire_at: '2026-06-01', disable_after: '2026-06-05', sub_token: 'subtk_h1i2j3k4l5m6n7o8', created_at: '2026-05-08' },
-  { id: 'mock-3', username: 'charlie', contact: 'charlie@example.com', note: null, status: 'inactive', expire_at: null, disable_after: null, sub_token: 'subtk_p1q2r3s4t5u6v7w8', created_at: '2026-05-15' },
-  { id: 'mock-4', username: 'david', contact: '139****2208', note: '已提醒续期', status: 'expired', expire_at: '2026-05-20', disable_after: '2026-05-27', sub_token: 'subtk_x1y2z3a4b5c6d7e8', created_at: '2026-04-01' },
-  { id: 'mock-6', username: 'frank', contact: '137****7788', note: '年付用户', status: 'active', expire_at: '2026-09-10', disable_after: '2026-09-17', sub_token: 'subtk_n1o2p3q4r5s6t7u8', created_at: '2026-05-26' }
-];
-
 const items = ref<Item[]>([]);
 const error = ref('');
-const usingMock = ref(false);
 const qUsername = ref('');
 const qContact = ref('');
 const qStatus = ref('');
@@ -251,7 +241,6 @@ const showAddPassword = ref(false);
 const showEditPassword = ref(false);
 const selected = ref<Item | null>(null);
 const deleteTarget = ref<Item | null>(null);
-const rotationDays = ref(0);
 const addError = ref('');
 const editError = ref('');
 const addFieldError = ref<{ username?: string; password?: string }>({});
@@ -334,7 +323,7 @@ function openEdit(u: Item) {
   editOpen.value = true;
 }
 
-function submitEdit() {
+async function submitEdit() {
   if (!selected.value) return;
   if (editForm.value.password.trim()) {
     const pErr = validatePassword(editForm.value.password.trim());
@@ -345,26 +334,40 @@ function submitEdit() {
   }
   editError.value = '';
   editFieldError.value = {};
-  items.value = items.value.map((u) =>
-    u.id === selected.value!.id
-      ? {
-          ...u,
-          contact: editForm.value.contact.trim() || null,
-          expire_at: editForm.value.expire_at || null,
-          disable_after: calcDisableAfter(editForm.value.expire_at || null, rotationDays.value),
-          sub_token: editForm.value.sub_token,
-          note: editForm.value.note.trim() || null
-        }
-      : u
-  );
-  editOpen.value = false;
+  try {
+    const payload: Record<string, unknown> = {
+      contact: editForm.value.contact.trim() || null,
+      expire_at: editForm.value.expire_at || null,
+      note: editForm.value.note.trim() || null
+    };
+    if (editForm.value.password.trim()) {
+      payload.password = editForm.value.password.trim();
+    }
+    const data = await api<{ item: Item }>(`/api/admin/users/${selected.value.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+    const next = data.item;
+    selected.value = { ...next };
+    editForm.value.password = '';
+    await loadUsers();
+    editOpen.value = false;
+  } catch (e) {
+    editError.value = `保存失败：${(e as Error).message}`;
+  }
 }
 
-function resetTokenInEdit() {
+async function resetTokenInEdit() {
   if (!selected.value) return;
-  const next = `subtk_${Math.random().toString(36).slice(2, 14)}`;
-  editForm.value.sub_token = next;
-  selected.value = { ...selected.value, sub_token: next };
+  try {
+    const data = await api<{ item: Item }>(`/api/admin/users/${selected.value.id}/reset-token`, { method: 'POST' });
+    const next = data.item.sub_token || '';
+    editForm.value.sub_token = next;
+    selected.value = { ...selected.value, sub_token: next };
+    await loadUsers();
+  } catch (e) {
+    editError.value = `重置token失败：${(e as Error).message}`;
+  }
 }
 
 function openAdd() {
@@ -375,7 +378,7 @@ function openAdd() {
   addOpen.value = true;
 }
 
-function submitAdd() {
+async function submitAdd() {
   const uErr = validateUsername(addForm.value.username);
   if (uErr) {
     addFieldError.value.username = uErr;
@@ -388,23 +391,22 @@ function submitAdd() {
   }
   addError.value = '';
   addFieldError.value = {};
-  const now = new Date().toISOString().slice(0, 10);
-  const token = `subtk_${Math.random().toString(36).slice(2, 14)}`;
-  const expireAt = addForm.value.expire_at || null;
-  const disableAfter = calcDisableAfter(expireAt, rotationDays.value);
-  items.value.unshift({
-    id: `mock-new-${Date.now()}`,
-    username: addForm.value.username.trim(),
-    contact: addForm.value.contact.trim() || null,
-    note: addForm.value.note.trim() || null,
-    status: 'inactive',
-    expire_at: expireAt,
-    disable_after: disableAfter,
-    sub_token: token,
-    created_at: now
-  });
-  usingMock.value = true;
-  addOpen.value = false;
+  try {
+    await api<{ item: Item }>('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: addForm.value.username.trim(),
+        password: addForm.value.password,
+        contact: addForm.value.contact.trim() || null,
+        expire_at: addForm.value.expire_at || null,
+        note: addForm.value.note.trim() || null
+      })
+    });
+    await loadUsers();
+    addOpen.value = false;
+  } catch (e) {
+    addError.value = `新增失败：${(e as Error).message}`;
+  }
 }
 
 function removeUser(u: Item) {
@@ -416,24 +418,32 @@ function openDelete(u: Item) {
   deleteOpen.value = true;
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   if (!deleteTarget.value) return;
-  removeUser(deleteTarget.value);
-  deleteOpen.value = false;
-  deleteTarget.value = null;
+  try {
+    await api(`/api/admin/users/${deleteTarget.value.id}`, { method: 'DELETE' });
+    await loadUsers();
+    deleteOpen.value = false;
+    deleteTarget.value = null;
+  } catch (e) {
+    error.value = `删除失败：${(e as Error).message}`;
+  }
 }
 
-function resetToken(u: Item) {
-  items.value = items.value.map((x) => (x.id === u.id ? { ...x, sub_token: `subtk_${Math.random().toString(36).slice(2, 14)}` } : x));
-}
-
-function calcDisableAfter(expireAt: string | null, days: number) {
-  if (!expireAt) return null;
-  const base = new Date(expireAt);
-  if (Number.isNaN(base.getTime())) return expireAt;
-  if (!days || days <= 0) return expireAt;
-  base.setDate(base.getDate() + days);
-  return `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+async function resetToken(u: Item) {
+  try {
+    const data = await api<{ item: Item }>(`/api/admin/users/${u.id}/reset-token`, { method: 'POST' });
+    const next = data.item.sub_token || '';
+    if (selected.value?.id === u.id) {
+      selected.value = { ...selected.value, sub_token: next };
+    }
+    if (editOpen.value && selected.value?.id === u.id) {
+      editForm.value.sub_token = next;
+    }
+    await loadUsers();
+  } catch (e) {
+    error.value = `重置token失败：${(e as Error).message}`;
+  }
 }
 
 function clearAddFieldError(field: 'username' | 'password') {
@@ -445,27 +455,18 @@ function clearEditFieldError(field: 'password') {
 }
 
 onMounted(async () => {
-  try {
-    try {
-      const settings = await api<Record<string, unknown>>('/api/admin/settings');
-      const v = Number(settings.rotation_grace_days ?? settings.user_disable_after_days ?? 0);
-      rotationDays.value = Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
-    } catch {
-      rotationDays.value = 0;
-    }
-    const data = await api<{ items: Item[] }>('/api/admin/users');
-    if (data.items?.length) {
-      items.value = data.items;
-      return;
-    }
-    items.value = mockUsers;
-    usingMock.value = true;
-  } catch (e) {
-    error.value = `接口读取失败，已切换演示数据：${(e as Error).message}`;
-    items.value = mockUsers;
-    usingMock.value = true;
-  }
+  await loadUsers();
 });
+
+async function loadUsers() {
+  try {
+    const data = await api<{ items: Item[] }>('/api/admin/users');
+    items.value = data.items || [];
+  } catch (e) {
+    error.value = `接口读取失败：${(e as Error).message}`;
+    items.value = [];
+  }
+}
 </script>
 
 <style scoped>

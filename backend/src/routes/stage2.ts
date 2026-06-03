@@ -1,15 +1,19 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
-import { randomBytes } from "crypto";
+import { randomInt } from "crypto";
+import bcrypt from "bcryptjs";
+import { env } from "../config/env.js";
 import {
   activationCodesCol,
   renewalLogsCol,
+  adminsCol,
   usersCol,
   type UserDoc
 } from "../lib/db.js";
 import { requireAdmin, requireUser } from "../middleware/require-role.js";
-import { verifyTurnstile } from "../services/turnstile.js";
+import { generateSubToken } from "../lib/utils.js";
+import { deriveUserStatus, resolveDisableAfterForWrite, syncUserLifecycle } from "../services/user-lifecycle.js";
 
 const router = Router();
 
@@ -19,6 +23,21 @@ const listUsersQuerySchema = z.object({
 
 const updateUserStatusSchema = z.object({
   status: z.enum(["inactive", "active", "grace", "expired", "disabled"])
+});
+
+const updateUserSchema = z.object({
+  password: z.string().min(8).max(128).optional(),
+  contact: z.string().trim().max(120).optional().nullable(),
+  expire_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  note: z.string().trim().max(200).optional().nullable()
+});
+
+const createUserSchema = z.object({
+  username: z.string().min(8).max(64).regex(/^[A-Za-z][A-Za-z0-9]*$/),
+  password: z.string().min(8).max(128),
+  contact: z.string().trim().max(120).optional().nullable(),
+  expire_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  note: z.string().trim().max(200).optional().nullable()
 });
 
 const createCodeSchema = z.object({
@@ -34,8 +53,7 @@ const listCodesQuerySchema = z.object({
 });
 
 const redeemSchema = z.object({
-  code: z.string().trim().min(8).max(64),
-  turnstileToken: z.string().optional()
+  code: z.string().trim().regex(/^[A-Z0-9]{6}$/, "code must be 6 chars [A-Z0-9]")
 });
 
 const manualRenewSchema = z.object({
@@ -44,11 +62,24 @@ const manualRenewSchema = z.object({
 });
 
 function generateActivationCode() {
-  return `SM-${randomBytes(5).toString("hex").toUpperCase()}`;
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let out = "";
+  for (let i = 0; i < 6; i += 1) {
+    out += chars[randomInt(0, chars.length)];
+  }
+  return out;
 }
 
 function addDays(base: Date, days: number) {
   return new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function atStartOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function isReservedAdminUsername(username: string) {
+  return username.trim() === String(env.ADMIN_USERNAME || "").trim();
 }
 
 function computeNextDates(previousExpireAt: Date | null, durationDays: number, graceDays: number) {
@@ -80,7 +111,10 @@ router.get("/admin/users", requireAdmin, async (req, res) => {
   }
   const filter = parsed.data.status ? { status: parsed.data.status } : {};
   const users = await usersCol().find(filter).sort({ created_at: -1 }).toArray();
-  return res.json({ items: users.map((u) => userSafeView(u as UserDoc & { _id: ObjectId })) });
+  const synced = await Promise.all(
+    users.map((u) => syncUserLifecycle(u as UserDoc & { _id: ObjectId }))
+  );
+  return res.json({ items: synced.map((u) => userSafeView(u as UserDoc & { _id: ObjectId })) });
 });
 
 router.patch("/admin/users/:userId/status", requireAdmin, async (req, res) => {
@@ -122,21 +156,24 @@ router.post("/admin/users/:userId/renew", requireAdmin, async (req, res) => {
   if (!user) {
     return res.status(404).json({ message: "User not found" });
   }
+  const now = new Date();
 
-  const { nextExpireAt, nextDisableAfter } = computeNextDates(
+  const { nextExpireAt } = computeNextDates(
     user.expire_at,
     parsed.data.durationDays,
     parsed.data.graceDays
   );
+  const effectiveDisableAfter = (await resolveDisableAfterForWrite(nextExpireAt, parsed.data.graceDays, now))
+    ?? addDays(atStartOfDay(nextExpireAt), parsed.data.graceDays);
 
-  const now = new Date();
   await usersCol().updateOne(
     { _id: userId },
     {
       $set: {
         status: "active",
         expire_at: nextExpireAt,
-        disable_after: nextDisableAfter,
+        disable_after: effectiveDisableAfter,
+        sub_token: user.sub_token || generateSubToken(),
         updated_at: now
       }
     }
@@ -152,7 +189,7 @@ router.post("/admin/users/:userId/renew", requireAdmin, async (req, res) => {
     previous_expire_at: user.expire_at,
     previous_disable_after: user.disable_after,
     next_expire_at: nextExpireAt,
-    next_disable_after: nextDisableAfter,
+    next_disable_after: effectiveDisableAfter,
     operator_user_id: new ObjectId(req.session.userId),
     operator_type: "admin",
     operator_username: req.session.username || "admin",
@@ -163,8 +200,144 @@ router.post("/admin/users/:userId/renew", requireAdmin, async (req, res) => {
   return res.json({
     message: "renewed",
     expire_at: nextExpireAt,
-    disable_after: nextDisableAfter
+    disable_after: effectiveDisableAfter
   });
+});
+
+router.post("/admin/users", requireAdmin, async (req, res) => {
+  const parsed = createUserSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid request payload" });
+  }
+
+  const trimmedUsername = parsed.data.username.trim();
+  if (isReservedAdminUsername(trimmedUsername)) {
+    return res.status(409).json({ message: "Username already exists" });
+  }
+
+  const [exists, adminExists] = await Promise.all([
+    usersCol().findOne({ username: trimmedUsername }),
+    adminsCol().findOne({ username: trimmedUsername })
+  ]);
+  if (exists || adminExists) {
+    return res.status(409).json({ message: "Username already exists" });
+  }
+
+  const now = new Date();
+  const expireAt = parsed.data.expire_at ? new Date(`${parsed.data.expire_at}T00:00:00.000Z`) : null;
+  const disableAfter = await resolveDisableAfterForWrite(expireAt, 3, now);
+  const status = deriveUserStatus({ status: "inactive", expire_at: expireAt, disable_after: disableAfter }, now);
+  const subToken = status === "active" || status === "grace" ? generateSubToken() : null;
+  const password_hash = await bcrypt.hash(parsed.data.password.trim(), 12);
+
+  const result = await usersCol().insertOne({
+    username: trimmedUsername,
+    password_hash,
+    contact: (parsed.data.contact ?? "").trim() || null,
+    note: (parsed.data.note ?? "").trim() || null,
+    sub_token: subToken,
+    status,
+    expire_at: expireAt,
+    disable_after: disableAfter,
+    created_at: now,
+    updated_at: now,
+    last_login_at: null
+  });
+
+  const created = await usersCol().findOne({ _id: result.insertedId });
+  if (!created) {
+    return res.status(500).json({ message: "User created but reload failed" });
+  }
+  return res.status(201).json({ item: userSafeView(created as UserDoc & { _id: ObjectId }) });
+});
+
+router.patch("/admin/users/:userId", requireAdmin, async (req, res) => {
+  const parsed = updateUserSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid request payload" });
+  }
+  if (!ObjectId.isValid(req.params.userId)) {
+    return res.status(400).json({ message: "Invalid user id" });
+  }
+  const userId = new ObjectId(req.params.userId);
+  const user = await usersCol().findOne({ _id: userId });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const now = new Date();
+  const update: Partial<UserDoc> & { updated_at: Date } = { updated_at: now };
+  if (parsed.data.contact !== undefined) {
+    const v = (parsed.data.contact ?? "").trim();
+    update.contact = v ? v : null;
+  }
+  if (parsed.data.note !== undefined) {
+    const v = (parsed.data.note ?? "").trim();
+    update.note = v ? v : null;
+  }
+  if (parsed.data.expire_at !== undefined) {
+    if (!parsed.data.expire_at) {
+      update.expire_at = null;
+      update.disable_after = null;
+      update.status = "inactive";
+    } else {
+      const expireAt = new Date(`${parsed.data.expire_at}T00:00:00.000Z`);
+      update.expire_at = expireAt;
+      update.disable_after = await resolveDisableAfterForWrite(expireAt, 3, now);
+      update.status = deriveUserStatus({ status: user.status, expire_at: expireAt, disable_after: update.disable_after }, now);
+      if ((update.status === "active" || update.status === "grace") && !user.sub_token) {
+        update.sub_token = generateSubToken();
+      }
+    }
+  }
+  if (parsed.data.password && parsed.data.password.trim()) {
+    update.password_hash = await bcrypt.hash(parsed.data.password.trim(), 12);
+  }
+
+  const updated = await usersCol().findOneAndUpdate(
+    { _id: userId },
+    { $set: update },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    return res.status(404).json({ message: "User not found" });
+  }
+  const synced = await syncUserLifecycle(updated as UserDoc & { _id: ObjectId }, now);
+  return res.json({ item: userSafeView(synced as UserDoc & { _id: ObjectId }) });
+});
+
+router.delete("/admin/users/:userId", requireAdmin, async (req, res) => {
+  if (!ObjectId.isValid(req.params.userId)) {
+    return res.status(400).json({ message: "Invalid user id" });
+  }
+  const userId = new ObjectId(req.params.userId);
+  const result = await usersCol().deleteOne({ _id: userId });
+  if (!result.deletedCount) {
+    return res.status(404).json({ message: "User not found" });
+  }
+  return res.json({ message: "deleted" });
+});
+
+router.post("/admin/users/:userId/reset-token", requireAdmin, async (req, res) => {
+  if (!ObjectId.isValid(req.params.userId)) {
+    return res.status(400).json({ message: "Invalid user id" });
+  }
+  const userId = new ObjectId(req.params.userId);
+  const now = new Date();
+  const result = await usersCol().findOneAndUpdate(
+    { _id: userId },
+    {
+      $set: {
+        sub_token: generateSubToken(),
+        updated_at: now
+      }
+    },
+    { returnDocument: "after" }
+  );
+  if (!result) {
+    return res.status(404).json({ message: "User not found" });
+  }
+  return res.json({ item: userSafeView(result as UserDoc & { _id: ObjectId }) });
 });
 
 router.get("/admin/renew-logs", requireAdmin, async (_req, res) => {
@@ -278,10 +451,6 @@ router.post("/redeem", requireUser, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid request payload" });
   }
-  const turnstile = await verifyTurnstile("redeem", parsed.data.turnstileToken);
-  if (!turnstile.ok) {
-    return res.status(400).json({ message: turnstile.message });
-  }
 
   const userId = new ObjectId(req.session.userId);
   const user = await usersCol().findOne({ _id: userId });
@@ -308,11 +477,13 @@ router.post("/redeem", requireUser, async (req, res) => {
     return res.status(409).json({ message: "Code invalid or already used" });
   }
 
-  const { nextExpireAt, nextDisableAfter } = computeNextDates(
+  const { nextExpireAt } = computeNextDates(
     user.expire_at,
     codeDoc.duration_days,
     codeDoc.grace_days
   );
+  const effectiveDisableAfter = (await resolveDisableAfterForWrite(nextExpireAt, codeDoc.grace_days, now))
+    ?? addDays(atStartOfDay(nextExpireAt), codeDoc.grace_days);
 
   await usersCol().updateOne(
     { _id: userId },
@@ -320,7 +491,8 @@ router.post("/redeem", requireUser, async (req, res) => {
       $set: {
         status: "active",
         expire_at: nextExpireAt,
-        disable_after: nextDisableAfter,
+        disable_after: effectiveDisableAfter,
+        sub_token: user.sub_token || generateSubToken(),
         updated_at: now
       }
     }
@@ -336,7 +508,7 @@ router.post("/redeem", requireUser, async (req, res) => {
     previous_expire_at: user.expire_at,
     previous_disable_after: user.disable_after,
     next_expire_at: nextExpireAt,
-    next_disable_after: nextDisableAfter,
+    next_disable_after: effectiveDisableAfter,
     operator_user_id: userId,
     operator_type: "user",
     operator_username: user.username,
@@ -347,7 +519,7 @@ router.post("/redeem", requireUser, async (req, res) => {
   return res.json({
     message: "redeemed",
     expire_at: nextExpireAt,
-    disable_after: nextDisableAfter
+    disable_after: effectiveDisableAfter
   });
 });
 

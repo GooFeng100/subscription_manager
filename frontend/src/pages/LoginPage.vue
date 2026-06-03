@@ -16,7 +16,11 @@
         autocomplete="current-password"
         :icon-src="passwordIcon"
       />
-      <div class="turnstile-placeholder">[Cloudflare Turnstile 验证区域]</div>
+      <TurnstileWidget
+        v-if="turnstileEnabled && turnstileSiteKey"
+        v-model="turnstileToken"
+        :site-key="turnstileSiteKey"
+      />
       <LoadingButton :loading="loading" :disabled="!username || !password" loading-text="登录中..." @click="submit">
         登录
       </LoadingButton>
@@ -28,17 +32,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import AuthLayout from '../components/auth/AuthLayout.vue';
 import FormField from '../components/ui/FormField.vue';
 import LoadingButton from '../components/ui/LoadingButton.vue';
+import TurnstileWidget from '../components/auth/TurnstileWidget.vue';
 import { api } from '../lib/api';
-import { validatePassword, validateUsername } from '../lib/validators';
+import { postAuthJson } from '../lib/auth-request';
+import { getPublicConfig } from '../lib/public-config';
 import usernameIcon from '../assets/icons/username.png';
 import passwordIcon from '../assets/icons/password.png';
 
 type Me = {
+  userType?: 'admin' | 'user';
   dashboard?: string;
 };
 
@@ -48,60 +55,84 @@ const password = ref('');
 const loading = ref(false);
 const msg = ref('');
 const msgType = ref<'ok' | 'err' | ''>('');
+const turnstileEnabled = ref(false);
+const turnstileSiteKey = ref('');
+const turnstileToken = ref('');
+
+const turnstileRequired = computed(() => turnstileEnabled.value && Boolean(turnstileSiteKey.value));
+
+function clearMessage() {
+  if (!msg.value) return;
+  msg.value = '';
+  msgType.value = '';
+}
+
+watch([username, password, turnstileToken], () => {
+  if (msgType.value === 'err') {
+    clearMessage();
+  }
+});
+
+async function loadPublicConfig() {
+  try {
+    const config = await getPublicConfig();
+    turnstileEnabled.value = !!config.turnstileEnabled;
+    turnstileSiteKey.value = String(config.turnstileSiteKey || '').trim();
+  } catch {
+    turnstileEnabled.value = false;
+    turnstileSiteKey.value = '';
+  }
+}
 
 async function submit() {
   if (!username.value || !password.value || loading.value) return;
-  const uErr = validateUsername(username.value);
-  if (uErr) { msg.value = uErr; msgType.value = "err"; return; }
-  const pErr = validatePassword(password.value);
-  if (pErr) { msg.value = pErr; msgType.value = "err"; return; }
+  if (!username.value.trim()) { msg.value = '请输入用户名'; msgType.value = 'err'; return; }
+  if (turnstileRequired.value && !turnstileToken.value) {
+    msg.value = '请先完成 Turnstile 验证';
+    msgType.value = 'err';
+    return;
+  }
   loading.value = true;
-  msg.value = '';
-  msgType.value = '';
+  clearMessage();
+
+  const result = await postAuthJson<{ message?: string; dashboard?: string; userType?: string }>('login', '/api/auth/login', {
+    username: username.value.trim(),
+    password: password.value,
+    turnstileToken: turnstileToken.value || undefined
+  });
+  if (!result.ok) {
+    msg.value = result.message;
+    msgType.value = 'err';
+    loading.value = false;
+    return;
+  }
 
   try {
-    try {
-      await api('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: username.value, password: password.value })
-      });
-    } catch (userErr) {
-      await api('/api/auth/admin/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: username.value, password: password.value })
-      }).catch(() => {
-        throw userErr;
-      });
-    }
-
     const me = await api<Me>('/api/auth/me');
     msg.value = '登录成功，正在跳转...';
     msgType.value = 'ok';
-    await router.push(me.dashboard || '/dashboard');
-  } catch (e) {
-    msg.value = (e as Error).message;
+    if (me.userType === 'admin') {
+      await router.push('/admin/users');
+    } else {
+      await router.push(me.dashboard || '/dashboard');
+    }
+  } catch {
+    msg.value = '登录成功，但获取用户信息失败，请刷新重试';
     msgType.value = 'err';
   } finally {
     loading.value = false;
   }
 }
+
+onMounted(() => {
+  void loadPublicConfig();
+});
 </script>
 
 <style scoped>
 .form {
   display: grid;
   gap: 12px;
-}
-
-.turnstile-placeholder {
-  min-height: 44px;
-  border: 1px solid #dde1eb;
-  border-radius: 8px;
-  background: #f1f3fa;
-  color: #475569;
-  display: grid;
-  place-items: center;
-  font-size: 13px;
 }
 
 .divider {
@@ -136,5 +167,16 @@ async function submit() {
   color: #1d4ed8;
   text-decoration: none;
   font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .msg,
+  .switch {
+    font-size: 14px;
+  }
+
+  .divider {
+    margin-top: 4px;
+  }
 }
 </style>

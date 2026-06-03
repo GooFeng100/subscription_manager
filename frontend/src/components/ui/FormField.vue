@@ -145,4 +145,23 @@ input {
   color: #64748b;
   font-size: 12px;
 }
+
+@media (max-width: 640px) {
+  .label {
+    font-size: 15px;
+  }
+
+  input {
+    font-size: 16px;
+    min-height: 42px;
+  }
+
+  .toggle {
+    font-size: 13px;
+  }
+
+  .hint {
+    font-size: 13px;
+  }
+}
 </style>

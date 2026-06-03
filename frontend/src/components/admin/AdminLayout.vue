@@ -154,11 +154,36 @@ async function logout() {
 }
 
 .footer button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
+  border: 1px solid #2c63de;
+  background: #2c63de;
+  color: #fff;
   border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
+  font-weight: 600;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.08s ease,
+    filter 0.16s ease;
+}
+
+.footer button:hover {
+  border-color: #1f4fb8;
+  background: #1f4fb8;
+  box-shadow: 0 0 0 2px rgba(44, 99, 222, 0.14);
+  filter: brightness(1.02);
+}
+
+.footer button:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.footer button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(44, 99, 222, 0.22);
 }
 
 .content {

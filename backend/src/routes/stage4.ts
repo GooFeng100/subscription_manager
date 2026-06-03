@@ -3,18 +3,20 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { redis } from "../lib/redis.js";
-import { subAccessLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
-import { getCurrentSubVersion } from "./stage6.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
+import { subAccessLogsCol, usersCol } from "../lib/db.js";
+import { syncUserLifecycle } from "../services/user-lifecycle.js";
+import {
+  countNodeProtocols,
+  createShortCacheKey,
+  maskToken
+} from "../lib/subscription-conversion.js";
+import { getNodePoolText } from "../lib/node-pool.js";
+import { getCurrentSubVersion } from "../services/subscription-version.js";
 
 const router = Router();
 
-const targetSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(32)
-  .default("clash");
+const targetSchema = z.string().trim().min(1).max(32).optional();
 
 function clientIp(ip?: string) {
   return ip || "unknown";
@@ -22,6 +24,118 @@ function clientIp(ip?: string) {
 
 function isExpired(expireAt: Date | null, now: Date) {
   return Boolean(expireAt && expireAt.getTime() < now.getTime());
+}
+
+function applyEmojiPreservingParams(url: URL) {
+  url.searchParams.set("emoji", "true");
+  url.searchParams.set("add_emoji", "true");
+  url.searchParams.set("remove_emoji", "false");
+  url.searchParams.set("remove_old_emoji", "false");
+}
+
+function normalizeFilenamePart(value: string) {
+  return String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/\u0000/g, "")
+    .slice(0, 120);
+}
+
+function normalizeSubscriptionFilenameTemplate(template: string) {
+  const value = String(template || "").trim();
+  if (!value || value === "{{username}}") {
+    return "{{username}}_V{{version}}";
+  }
+  return value;
+}
+
+function buildSubscriptionFilename(
+  template: string,
+  params: { username: string; target: string; expire: string; version: string }
+) {
+  const fallback = `${params.username || "subscription"}_V${params.version || ""}`.replace(/_V$/, "");
+  const replaced = String(normalizeSubscriptionFilenameTemplate(template) || fallback)
+    .replace(/\{\{username\}\}/gi, params.username)
+    .replace(/\{\{target\}\}/gi, params.target)
+    .replace(/\{\{expire\}\}/gi, params.expire)
+    .replace(/\{\{version\}\}/gi, params.version);
+  return normalizeFilenamePart(replaced) || normalizeFilenamePart(fallback) || "subscription";
+}
+
+function buildEmptySubscriptionTitle(status: "expired" | "inactive" | "disabled") {
+  if (status === "inactive") {
+    return "账号未授权，请兑换授权码";
+  }
+  if (status === "disabled") {
+    return "账号已禁用，请联系管理员";
+  }
+  return "订阅已过期，请联系管理员";
+}
+
+function buildEmptySubscriptionContent(target: string) {
+  if (target === "clash" || target === "mihomo") {
+    return [
+      "port: 7890",
+      "socks-port: 7891",
+      "allow-lan: true",
+      "mode: Rule",
+      "log-level: info",
+      "external-controller: 127.0.0.1:9090",
+      "proxies: []",
+      "proxy-groups: []",
+      "rules: []"
+    ].join("\n");
+  }
+  return "";
+}
+
+function buildShadowrocketSubscriptionContent(nodePoolText: string) {
+  const lines = nodePoolText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => /^(?:ss|trojan|vmess|vless|ssr):\/\//i.test(line));
+
+  if (!lines.length) {
+    return "";
+  }
+
+  return Buffer.from(lines.join("\n"), "utf8").toString("base64");
+}
+
+function normalizeConverterTarget(target: string) {
+  switch (target) {
+    case "mihomo":
+      return "clash";
+    case "sing-box":
+      return "singbox";
+    default:
+      return target;
+  }
+}
+
+function formatSubscriptionExpireDate(user: { expire_at: Date | null; disable_after: Date | null }) {
+  const source = user.expire_at;
+  if (!source) return "";
+  const yyyy = source.getFullYear();
+  const mm = String(source.getMonth() + 1).padStart(2, "0");
+  const dd = String(source.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function buildSubscriptionUserInfo(user: { expire_at: Date | null; disable_after: Date | null }) {
+  const source = user.expire_at;
+  if (!source) return null;
+  const expire = Math.floor(source.getTime() / 1000);
+  return `expire=${expire}`;
+}
+
+function buildContentDisposition(filename: string) {
+  const base = normalizeFilenamePart(filename) || "subscription";
+  const asciiSafe = base.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, '\\"') || "subscription";
+  const encoded = encodeURIComponent(base);
+  return `attachment; filename="${asciiSafe}.yaml"; filename*=UTF-8''${encoded}.yaml`;
 }
 
 async function writeAccessLog(params: {
@@ -37,7 +151,7 @@ async function writeAccessLog(params: {
   await subAccessLogsCol().insertOne({
     user_id: params.userId ? new ObjectId(params.userId) : null,
     username: params.username,
-    token: params.token,
+    token: maskToken(params.token),
     target: params.target,
     ip: params.ip,
     status_code: params.statusCode,
@@ -47,13 +161,32 @@ async function writeAccessLog(params: {
   });
 }
 
+router.get("/api/internal/converter-source/:cacheKey", async (req, res) => {
+  const secret = String(req.query.secret || "");
+  if (!env.CONVERTER_SOURCE_SECRET || secret !== env.CONVERTER_SOURCE_SECRET) {
+    return res.status(403).type("text/plain; charset=utf-8").send("forbidden");
+  }
+
+  const cacheKey = String(req.params.cacheKey || "");
+  const text = await redis.get(`sm:sub:source:${cacheKey}`);
+  if (!text) {
+    return res.status(404).type("text/plain; charset=utf-8").send("source not found");
+  }
+
+  const format = String(req.query.format || "");
+  const output = format === "base64" ? Buffer.from(text, "utf8").toString("base64") : text;
+  return res.setHeader("Cache-Control", "no-store").type("text/plain; charset=utf-8").send(output);
+});
+
 router.get("/sub/:token", async (req, res) => {
   const token = req.params.token;
   const targetParsed = targetSchema.safeParse(req.query.target);
-  const target = targetParsed.success ? targetParsed.data : "clash";
   const ip = clientIp(req.ip);
-  const subVersion = await getCurrentSubVersion();
   const settings = await getRuntimeSettings();
+  const target = targetParsed.success ? targetParsed.data || settings.converter_default_target || "clash" : settings.converter_default_target || "clash";
+  const converterTarget = normalizeConverterTarget(target);
+  const subVersion = await getCurrentSubVersion();
+  const nodePoolText = await getNodePoolText();
 
   const now = new Date();
   const user = await usersCol().findOne({ sub_token: token });
@@ -71,46 +204,78 @@ router.get("/sub/:token", async (req, res) => {
     return res.status(404).type("text/plain; charset=utf-8").send("subscription token not found");
   }
 
-  if (user.status === "disabled") {
+  const syncedUser = await syncUserLifecycle(user);
+  const responseHeaders = (response: import("express").Response, filename: string, userInfoHeader: string | null) => {
+    response
+      .setHeader("X-Subscription-Version", String(subVersion.version))
+      .setHeader("Content-Disposition", buildContentDisposition(filename))
+      .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+      .setHeader("Pragma", "no-cache")
+      .type("text/plain; charset=utf-8");
+    if (userInfoHeader) {
+      response.setHeader("Subscription-Userinfo", userInfoHeader);
+    }
+    return response;
+  };
+
+  if (syncedUser.status === "disabled") {
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
-      statusCode: 403,
-      success: false,
-      message: "user disabled"
+      statusCode: 200,
+      success: true,
+      message: "account disabled, empty payload returned"
     });
-    return res.status(403).type("text/plain; charset=utf-8").send("account disabled");
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    const response = responseHeaders(
+      res.status(200),
+      buildEmptySubscriptionTitle("disabled"),
+      userInfoHeader
+    );
+    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("disabled")}`);
   }
 
-  if (user.status === "inactive") {
+  if (syncedUser.status === "inactive") {
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
-      statusCode: 403,
-      success: false,
-      message: "user inactive"
+      statusCode: 200,
+      success: true,
+      message: "account inactive, empty payload returned"
     });
-    return res.status(403).type("text/plain; charset=utf-8").send("account not activated");
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    const response = responseHeaders(
+      res.status(200),
+      buildEmptySubscriptionTitle("inactive"),
+      userInfoHeader
+    );
+    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("inactive")}`);
   }
 
-  if (isExpired(user.expire_at, now)) {
+  if (isExpired(syncedUser.expire_at, now) && syncedUser.status === "expired") {
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
-      statusCode: 403,
-      success: false,
-      message: "subscription expired"
+      statusCode: 200,
+      success: true,
+      message: "subscription expired, empty payload returned"
     });
-    return res.status(403).type("text/plain; charset=utf-8").send("subscription expired");
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    const response = responseHeaders(
+      res.status(200),
+      buildEmptySubscriptionTitle("expired"),
+      userInfoHeader
+    );
+    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("expired")}`);
   }
 
   const rlKey = `sm:sub:rl:${token}:${ip}`;
@@ -120,8 +285,8 @@ router.get("/sub/:token", async (req, res) => {
   }
   if (current > settings.sub_rate_limit_per_minute) {
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
@@ -132,59 +297,87 @@ router.get("/sub/:token", async (req, res) => {
     return res.status(429).type("text/plain; charset=utf-8").send("too many subscription requests");
   }
 
-  const cacheKey = `sm:sub:cache:v${subVersion}:${token}:${target}`;
-  const cached = await redis.get(cacheKey);
-  if (cached) {
+  if (!nodePoolText) {
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
+      token,
+      target,
+      ip,
+      statusCode: 503,
+      success: false,
+      message: "node pool empty"
+    });
+    return res.status(503).type("text/plain; charset=utf-8").send("node pool is empty, please test upstreams first");
+  }
+
+  if (target === "shadowrocket") {
+    const payload = buildShadowrocketSubscriptionContent(nodePoolText);
+    if (!payload) {
+      await writeAccessLog({
+        userId: String(syncedUser._id),
+        username: syncedUser.username,
+        token,
+        target,
+        ip,
+        statusCode: 502,
+        success: false,
+        message: "shadowrocket payload empty"
+      });
+      return res.status(200).type("text/plain; charset=utf-8").send("");
+    }
+
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    await writeAccessLog({
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
       statusCode: 200,
       success: true,
-      message: "cache hit"
+      message: `ok nodes=${countNodeProtocols(nodePoolText)} shadowrocket=direct`
     });
-    return res
-      .status(200)
-      .setHeader("X-Subscription-Version", String(subVersion))
-      .type("text/plain; charset=utf-8")
-      .send(cached);
+    return responseHeaders(
+      res.status(200),
+      buildSubscriptionFilename(
+        settings.subscription_filename_template || "{{username}}_V{{version}}",
+        {
+          username: syncedUser.username,
+          target,
+          expire: formatSubscriptionExpireDate(syncedUser),
+          version: String(subVersion.version)
+        }
+      ),
+      userInfoHeader
+    ).send(payload);
   }
 
-  const enabledUpstreams = await upstreamsCol().find({ enabled: true }).sort({ updated_at: -1 }).toArray();
-  if (!enabledUpstreams.length) {
-    await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
-      token,
+  const sourceCacheKey = createShortCacheKey();
+  const sourceCacheTtl = 300;
+  await redis.set(`sm:sub:source:${sourceCacheKey}`, nodePoolText, "EX", sourceCacheTtl);
+
+  const internalSourceUrl = new URL(`http://app:${env.PORT}/api/internal/converter-source/${sourceCacheKey}`);
+  internalSourceUrl.searchParams.set("secret", env.CONVERTER_SOURCE_SECRET || "");
+  internalSourceUrl.searchParams.set("format", "base64");
+
+  const converterUrl = new URL(settings.converter_backend_url || "http://subconverter:25500/sub");
+  converterUrl.searchParams.set("target", converterTarget);
+  converterUrl.searchParams.set("url", internalSourceUrl.toString());
+  if (settings.converter_default_config_url) {
+    converterUrl.searchParams.set("config", settings.converter_default_config_url);
+  }
+  const subscriptionFilename = buildSubscriptionFilename(
+    settings.subscription_filename_template || "{{username}}_V{{version}}",
+    {
+      username: syncedUser.username,
       target,
-      ip,
-      statusCode: 503,
-      success: false,
-      message: "no enabled upstream"
-    });
-    return res.status(503).type("text/plain; charset=utf-8").send("no enabled upstream");
-  }
-
-  if (!settings.converter_backend_url) {
-    await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
-      token,
-      target,
-      ip,
-      statusCode: 503,
-      success: false,
-      message: "converter backend not configured"
-    });
-    return res.status(503).type("text/plain; charset=utf-8").send("converter backend not configured");
-  }
-
-  const sourceUrls = enabledUpstreams.map((u) => u.source_url).join("|");
-  const converterUrl = new URL("/sub", settings.converter_backend_url);
-  converterUrl.searchParams.set("target", target);
-  converterUrl.searchParams.set("url", sourceUrls);
+      expire: formatSubscriptionExpireDate(syncedUser),
+      version: String(subVersion.version)
+    }
+  );
+  converterUrl.searchParams.set("filename", subscriptionFilename);
+  applyEmojiPreservingParams(converterUrl);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), env.SUB_CONVERTER_TIMEOUT_MS);
@@ -197,8 +390,8 @@ router.get("/sub/:token", async (req, res) => {
     const text = await resp.text();
     if (!resp.ok) {
       await writeAccessLog({
-        userId: String(user._id),
-        username: user.username,
+        userId: String(syncedUser._id),
+        username: syncedUser.username,
         token,
         target,
         ip,
@@ -208,28 +401,46 @@ router.get("/sub/:token", async (req, res) => {
       });
       return res.status(502).type("text/plain; charset=utf-8").send("converter request failed");
     }
-
-    await redis.set(cacheKey, text, "EX", settings.sub_cache_seconds);
+    if (!text.trim()) {
+      await writeAccessLog({
+        userId: String(syncedUser._id),
+        username: syncedUser.username,
+        token,
+        target,
+        ip,
+        statusCode: 502,
+        success: false,
+        message: "converter returned empty payload"
+      });
+      return res.status(502).type("text/plain; charset=utf-8").send("converter returned empty payload");
+    }
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,
       statusCode: 200,
       success: true,
-      message: "ok"
+      message: `ok nodes=${countNodeProtocols(nodePoolText)}`
     });
-    return res
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    const response = res
       .status(200)
-      .setHeader("X-Subscription-Version", String(subVersion))
-      .type("text/plain; charset=utf-8")
-      .send(text);
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "converter request error";
+      .setHeader("X-Subscription-Version", String(subVersion.version))
+      .setHeader("Content-Disposition", buildContentDisposition(subscriptionFilename))
+      .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+      .setHeader("Pragma", "no-cache")
+      .type("text/plain; charset=utf-8");
+    if (userInfoHeader) {
+      response.setHeader("Subscription-Userinfo", userInfoHeader);
+    }
+    return response.send(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "converter request error";
     await writeAccessLog({
-      userId: String(user._id),
-      username: user.username,
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
       token,
       target,
       ip,

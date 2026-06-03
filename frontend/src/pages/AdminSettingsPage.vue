@@ -21,21 +21,66 @@
           <input v-model="form.site_domain" readonly class="readonly" />
           <small>由部署环境变量与网关配置决定，此处仅展示当前生效值。</small>
         </label>
-        <label><span class="label-title">转换后端地址 <em class="req">*</em></span>
-          <input v-model="form.converter_backend_url" placeholder="http://subconverter:25500" :class="{ 'is-error': !!fieldError.converter_backend_url }" @focus="clearFieldError('converter_backend_url')" />
-          <small v-if="fieldError.converter_backend_url" class="error-text">{{ fieldError.converter_backend_url }}</small>
-          <small>用于订阅转换的后端服务地址，通常指向 subconverter 服务。</small>
-        </label>
-        <label><span class="label-title">订阅缓存（秒） <em class="req">*</em></span>
-          <input v-model.number="form.sub_cache_seconds" type="number" min="1" :class="{ 'is-error': !!fieldError.sub_cache_seconds }" @focus="clearFieldError('sub_cache_seconds')" />
-          <small v-if="fieldError.sub_cache_seconds" class="error-text">{{ fieldError.sub_cache_seconds }}</small>
-          <small>相同订阅请求在缓存有效期内直接返回缓存结果，减少上游压力。</small>
-        </label>
         <label><span class="label-title">订阅限流（次/分钟） <em class="req">*</em></span>
           <input v-model.number="form.sub_rate_limit_per_minute" type="number" min="1" :class="{ 'is-error': !!fieldError.sub_rate_limit_per_minute }" @focus="clearFieldError('sub_rate_limit_per_minute')" />
           <small v-if="fieldError.sub_rate_limit_per_minute" class="error-text">{{ fieldError.sub_rate_limit_per_minute }}</small>
           <small>限制单用户/单 token 的订阅接口访问频率，避免高频刷新。</small>
         </label>
+      </div>
+      <div class="panel-note">
+        Turnstile 的 Site Key / Secret Key 现在只从环境变量读取，后台不再提供修改入口。修改后需要重启容器生效。
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>订阅转换与分流规则</h2></div>
+      <div class="panel-body form-grid">
+        <label><span class="label-title">转换后端默认地址</span>
+          <input :value="defaultConverterBackendUrl" readonly class="readonly" />
+          <small>系统默认使用本地 subconverter 地址；通常无需修改。</small>
+        </label>
+        <label>
+          使用自定义转换后端
+          <div class="switch-row">
+            <input
+              type="checkbox"
+              :checked="form.use_custom_converter_backend_url"
+              @change="setCustomConverterBackendEnabled(($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ form.use_custom_converter_backend_url ? '已启用自定义覆盖' : '使用默认地址' }}</span>
+          </div>
+          <small>开启后可覆盖默认地址；关闭后自动回退为系统默认值。</small>
+        </label>
+        <label v-if="form.use_custom_converter_backend_url"><span class="label-title">自定义转换后端地址 <em class="req">*</em></span>
+          <input v-model="form.converter_backend_url" placeholder="http://subconverter:25500/sub" :class="{ 'is-error': !!fieldError.converter_backend_url }" @focus="clearFieldError('converter_backend_url')" />
+          <small v-if="fieldError.converter_backend_url" class="error-text">{{ fieldError.converter_backend_url }}</small>
+          <small>系统会把已识别并合并的上游节点交给该地址对应的 subconverter 处理。</small>
+        </label>
+        <label><span class="label-title">默认客户端 <em class="req">*</em></span>
+          <select v-model="form.converter_default_target" :class="{ 'is-error': !!fieldError.converter_default_target }" @focus="clearFieldError('converter_default_target')">
+            <option v-for="option in targetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+          <small v-if="fieldError.converter_default_target" class="error-text">{{ fieldError.converter_default_target }}</small>
+          <small>用户未指定 target 时使用的客户端类型。</small>
+        </label>
+        <label><span class="label-title">默认分流规则 <em class="req">*</em></span>
+          <input v-model="form.converter_default_config_url" placeholder="https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" :class="{ 'is-error': !!fieldError.converter_default_config_url }" @focus="clearFieldError('converter_default_config_url')" />
+          <small v-if="fieldError.converter_default_config_url" class="error-text">{{ fieldError.converter_default_config_url }}</small>
+          <small>会通过 subconverter 的 config 参数传入，用于生成 Clash 策略组和规则。</small>
+        </label>
+        <label><span class="label-title">订阅文件名模板 <em class="req">*</em></span>
+          <input v-model="form.subscription_filename_template" placeholder="{{username}}_V{{version}}" :class="{ 'is-error': !!fieldError.subscription_filename_template }" @focus="clearFieldError('subscription_filename_template')" />
+          <small v-if="fieldError.subscription_filename_template" class="error-text">{{ fieldError.subscription_filename_template }}</small>
+          <small>可用占位符：<code v-pre>{{username}}</code>、<code v-pre>{{target}}</code>、<code v-pre>{{expire}}</code>、<code v-pre>{{version}}</code>。例如 <code v-pre>{{username}}_V{{version}}</code>。</small>
+        </label>
+        <label><span class="label-title">自动轮询间隔（分钟） <em class="req">*</em></span>
+          <input v-model.number="form.upstream_poll_interval_minutes" type="number" min="0" :class="{ 'is-error': !!fieldError.upstream_poll_interval_minutes }" @focus="clearFieldError('upstream_poll_interval_minutes')" />
+          <small v-if="fieldError.upstream_poll_interval_minutes" class="error-text">{{ fieldError.upstream_poll_interval_minutes }}</small>
+          <small>0 表示关闭自动轮询；大于 0 时，后台会按该间隔自动执行一次“全部测试”。</small>
+        </label>
+      </div>
+      <div class="panel-note">
+        系统会先由后端拉取、识别、解码并合并上游订阅，再交给本地 subconverter 转换为客户端配置。上游抓取的 User-Agent 会根据每条上游的类型自动选择；默认分流规则会通过 subconverter 的 config 参数传入，用于生成 Clash 等客户端的策略组和规则。文件名模板会用于 subconverter 的 <code>filename</code> 参数，并尽量保留你设置的命名风格。
       </div>
     </section>
 
@@ -71,7 +116,7 @@
         <label>
           启用 Turnstile 总开关
           <div class="switch-row"><input type="checkbox" v-model="form.turnstile_enabled" /><span>{{ form.turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
-          <small>总开关关闭时，登录/注册/兑换的子开关将不生效。</small>
+          <small>总开关关闭时，登录/注册的子开关将不生效。</small>
         </label>
         <label>
           登录启用
@@ -82,21 +127,6 @@
           注册启用
           <div class="switch-row"><input type="checkbox" v-model="form.register_turnstile_enabled" /><span>{{ form.register_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
           <small>控制注册页是否要求通过 Turnstile 验证。</small>
-        </label>
-        <label>
-          兑换启用
-          <div class="switch-row"><input type="checkbox" v-model="form.redeem_turnstile_enabled" /><span>{{ form.redeem_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
-          <small>控制兑换授权码页面是否要求通过 Turnstile 验证。</small>
-        </label>
-        <label><span class="label-title">Site Key <em class="req">*</em></span>
-          <input v-model="form.turnstile_site_key" placeholder="0x4AAAA..." :class="{ 'is-error': !!fieldError.turnstile_site_key }" @focus="clearFieldError('turnstile_site_key')" />
-          <small v-if="fieldError.turnstile_site_key" class="error-text">{{ fieldError.turnstile_site_key }}</small>
-          <small>前端渲染 Turnstile 小组件所需公钥。</small>
-        </label>
-        <label><span class="label-title">Secret Key <em class="req">*</em></span>
-          <input v-model="form.turnstile_secret_key" type="password" placeholder="0x4AAAA..." :class="{ 'is-error': !!fieldError.turnstile_secret_key }" @focus="clearFieldError('turnstile_secret_key')" />
-          <small v-if="fieldError.turnstile_secret_key" class="error-text">{{ fieldError.turnstile_secret_key }}</small>
-          <small>后端校验 Turnstile token 所需私钥，请妥善保管。</small>
         </label>
       </div>
     </section>
@@ -117,8 +147,11 @@ import { api } from '../lib/api';
 type Settings = {
   registration_enabled: boolean;
   converter_backend_url: string;
+  converter_default_target: string;
+  converter_default_config_url: string;
+  subscription_filename_template: string;
+  upstream_poll_interval_minutes: number;
   sub_rate_limit_per_minute: number;
-  sub_cache_seconds: number;
   login_fail_limit: number;
   login_lock_minutes: number;
   register_ip_limit: number;
@@ -126,17 +159,21 @@ type Settings = {
   turnstile_enabled: boolean;
   login_turnstile_enabled: boolean;
   register_turnstile_enabled: boolean;
-  redeem_turnstile_enabled: boolean;
   site_domain: string;
-  turnstile_site_key: string;
-  turnstile_secret_key: string;
 };
 
-const form = reactive<Settings>({
+const defaultConverterBackendUrl = 'http://subconverter:25500/sub';
+
+const form = reactive<Settings & {
+  use_custom_converter_backend_url: boolean;
+}>({
   registration_enabled: true,
-  converter_backend_url: '',
+  converter_backend_url: defaultConverterBackendUrl,
+  converter_default_target: 'clash',
+  converter_default_config_url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini',
+  subscription_filename_template: '{{username}}_V{{version}}',
+  upstream_poll_interval_minutes: 60,
   sub_rate_limit_per_minute: 60,
-  sub_cache_seconds: 60,
   login_fail_limit: 5,
   login_lock_minutes: 15,
   register_ip_limit: 10,
@@ -144,11 +181,17 @@ const form = reactive<Settings>({
   turnstile_enabled: false,
   login_turnstile_enabled: false,
   register_turnstile_enabled: false,
-  redeem_turnstile_enabled: false,
   site_domain: '',
-  turnstile_site_key: '',
-  turnstile_secret_key: ''
+  use_custom_converter_backend_url: false
 });
+
+const targetOptions = [
+  { value: 'clash', label: 'Clash' },
+  { value: 'mihomo', label: 'Mihomo' },
+  { value: 'sing-box', label: 'sing-box' },
+  { value: 'v2ray', label: 'V2Ray' },
+  { value: 'shadowrocket', label: 'Shadowrocket' }
+];
 
 const msg = ref('');
 const msgType = ref<'ok' | 'bad' | ''>('');
@@ -157,6 +200,9 @@ const fieldError = reactive<Record<string, string>>({});
 
 function assignForm(v: Partial<Settings>) {
   Object.assign(form, v);
+  const backendUrl = String(v.converter_backend_url || defaultConverterBackendUrl).trim();
+  form.use_custom_converter_backend_url = backendUrl !== defaultConverterBackendUrl;
+  form.converter_backend_url = form.use_custom_converter_backend_url ? backendUrl : defaultConverterBackendUrl;
 }
 
 async function load() {
@@ -182,9 +228,14 @@ async function save() {
     }
     const payload: Settings = {
       registration_enabled: !!form.registration_enabled,
-      converter_backend_url: String(form.converter_backend_url || '').trim(),
+      converter_backend_url: form.use_custom_converter_backend_url
+        ? String(form.converter_backend_url || '').trim() || defaultConverterBackendUrl
+        : defaultConverterBackendUrl,
+      converter_default_target: String(form.converter_default_target || '').trim(),
+      converter_default_config_url: String(form.converter_default_config_url || '').trim(),
+      subscription_filename_template: String(form.subscription_filename_template || '').trim() || '{{username}}_V{{version}}',
+      upstream_poll_interval_minutes: Math.max(0, Number(form.upstream_poll_interval_minutes) || 0),
       sub_rate_limit_per_minute: Math.max(1, Number(form.sub_rate_limit_per_minute) || 1),
-      sub_cache_seconds: Math.max(1, Number(form.sub_cache_seconds) || 1),
       login_fail_limit: Math.max(1, Number(form.login_fail_limit) || 1),
       login_lock_minutes: Math.max(1, Number(form.login_lock_minutes) || 1),
       register_ip_limit: Math.max(1, Number(form.register_ip_limit) || 1),
@@ -192,10 +243,7 @@ async function save() {
       turnstile_enabled: !!form.turnstile_enabled,
       login_turnstile_enabled: !!form.login_turnstile_enabled,
       register_turnstile_enabled: !!form.register_turnstile_enabled,
-      redeem_turnstile_enabled: !!form.redeem_turnstile_enabled,
-      site_domain: String(form.site_domain || '').trim(),
-      turnstile_site_key: String(form.turnstile_site_key || '').trim(),
-      turnstile_secret_key: String(form.turnstile_secret_key || '').trim()
+      site_domain: String(form.site_domain || '').trim()
     };
     // site_domain is environment-driven and displayed as read-only.
     delete (payload as Partial<Settings>).site_domain;
@@ -217,24 +265,34 @@ function clearFieldError(field: string) {
   fieldError[field] = '';
 }
 
+function setCustomConverterBackendEnabled(enabled: boolean) {
+  form.use_custom_converter_backend_url = enabled;
+  if (!enabled) {
+    form.converter_backend_url = defaultConverterBackendUrl;
+    clearFieldError('converter_backend_url');
+  }
+}
+
 function validatePositiveInt(v: number, min = 1, max = 100000) {
   return Number.isInteger(v) && v >= min && v <= max;
 }
 
 function validateForm() {
   Object.keys(fieldError).forEach((k) => delete fieldError[k]);
-  const url = String(form.converter_backend_url || '').trim();
-  if (!/^https?:\/\/.+/i.test(url)) fieldError.converter_backend_url = '请输入有效的 http/https 地址';
-  if (!validatePositiveInt(Number(form.sub_cache_seconds), 1, 86400)) fieldError.sub_cache_seconds = '范围 1~86400 秒';
+  if (form.use_custom_converter_backend_url) {
+    const url = String(form.converter_backend_url || '').trim();
+    if (!/^https?:\/\/.+/i.test(url)) fieldError.converter_backend_url = '请输入有效的 http/https 地址';
+  }
+  if (!String(form.converter_default_target || '').trim()) fieldError.converter_default_target = '请输入默认客户端';
+  const defaultConfigUrl = String(form.converter_default_config_url || '').trim();
+  if (defaultConfigUrl && !/^https?:\/\/.+/i.test(defaultConfigUrl)) fieldError.converter_default_config_url = '请输入有效的 http/https 地址';
+  if (!String(form.subscription_filename_template || '').trim()) fieldError.subscription_filename_template = '请输入文件名模板';
+  if (!validatePositiveInt(Number(form.upstream_poll_interval_minutes), 0, 10080)) fieldError.upstream_poll_interval_minutes = '范围 0~10080 分钟';
   if (!validatePositiveInt(Number(form.sub_rate_limit_per_minute), 1, 10000)) fieldError.sub_rate_limit_per_minute = '范围 1~10000 次/分钟';
   if (!validatePositiveInt(Number(form.login_fail_limit), 1, 1000)) fieldError.login_fail_limit = '范围 1~1000';
   if (!validatePositiveInt(Number(form.login_lock_minutes), 1, 10080)) fieldError.login_lock_minutes = '范围 1~10080 分钟';
   if (!validatePositiveInt(Number(form.register_ip_limit), 1, 1000)) fieldError.register_ip_limit = '范围 1~1000';
   if (!validatePositiveInt(Number(form.register_ip_window_minutes), 1, 10080)) fieldError.register_ip_window_minutes = '范围 1~10080 分钟';
-  if (form.turnstile_enabled || form.login_turnstile_enabled || form.register_turnstile_enabled || form.redeem_turnstile_enabled) {
-    if (!String(form.turnstile_site_key || '').trim()) fieldError.turnstile_site_key = '启用 Turnstile 时 Site Key 不能为空';
-    if (!String(form.turnstile_secret_key || '').trim()) fieldError.turnstile_secret_key = '启用 Turnstile 时 Secret Key 不能为空';
-  }
   return Object.keys(fieldError).length === 0;
 }
 
@@ -253,17 +311,32 @@ h1 { margin: 0; color: #0f172a; }
 .panel-head { padding: 12px 14px; border-bottom: 1px solid #e2e8f0; }
 .panel-head h2 { margin: 0; font-size: 16px; color: #0f172a; }
 .panel-body { padding: 12px 14px; }
+.panel-note { padding: 0 14px 14px; color: #64748b; font-size: 12px; line-height: 1.6; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
 .form-grid label { display: grid; gap: 6px; font-size: 13px; color: #334155; }
 .label-title { font-size: 13px; color: #334155; }
 .req { color: #dc2626; font-style: normal; }
 .form-grid input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; min-height: 40px; box-sizing: border-box; }
+.form-grid select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; min-height: 40px; box-sizing: border-box; background: #fff; }
 .form-grid small { color: #64748b; font-size: 12px; line-height: 1.35; }
 .form-grid input.is-error { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12); }
+.form-grid select.is-error { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.12); }
 .form-grid .error-text { color: #b91c1c; }
 .form-grid input.readonly { background: #f8fafc; color: #475569; cursor: not-allowed; }
-.switch-row { display: flex !important; align-items: center; gap: 8px; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; min-height: 40px; box-sizing: border-box; background: #fff; }
-.switch-row input { width: 16px; height: 16px; }
+.switch-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0 10px;
+  height: 40px;
+  box-sizing: border-box;
+  background: #fff;
+  line-height: 1;
+}
+.switch-row input { width: 16px; height: 16px; margin: 0; }
+.switch-row span { line-height: 1; }
 
 .foot-actions { border: 1px solid #dbe3ef; background: #fff; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 8px; }
 .msg { margin: 0 auto 0 0; font-size: 13px; color: #64748b; }

@@ -56,21 +56,20 @@
         <table class="table">
           <thead>
             <tr>
-              <th>编号</th><th>用户名</th><th>动作</th><th>结果</th><th>来源IP</th><th>消息</th><th>时间</th>
+              <th>时间</th><th>用户名</th><th>动作</th><th>结果</th><th>来源IP</th><th>消息</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(r, idx) in authRows" :key="r.id">
-              <td class="mono">A{{ String(idx + 1).padStart(3, '0') }}</td>
+            <tr v-for="r in authRows" :key="r.id">
+              <td>{{ fmtDayTime(r.created_at) }}</td>
               <td>{{ r.username }}</td>
-              <td>{{ r.action }}</td>
+              <td>{{ authActionLabel(r.action) }}</td>
               <td><span class="status" :class="r.success ? 'is-ok' : 'is-bad'">{{ r.success ? '成功' : '失败' }}</span></td>
               <td>{{ r.ip }}</td>
-              <td>{{ r.message }}</td>
-              <td>{{ fmtDayTime(r.created_at) }}</td>
+              <td>{{ logMessageLabel(r.message) }}</td>
             </tr>
-            <tr v-if="loadingAuth" class="empty-row"><td colspan="7">加载中...</td></tr>
-            <tr v-else-if="authRows.length === 0" class="empty-row"><td colspan="7">暂无登录日志</td></tr>
+            <tr v-if="loadingAuth" class="empty-row"><td colspan="6">加载中...</td></tr>
+            <tr v-else-if="authRows.length === 0" class="empty-row"><td colspan="6">暂无登录日志</td></tr>
           </tbody>
         </table>
       </div>
@@ -79,21 +78,19 @@
         <table class="table">
           <thead>
             <tr>
-              <th>编号</th><th>授权码</th><th>状态</th><th>使用用户</th><th>使用时间</th><th>作废时间</th><th>备注</th>
+              <th>时间</th><th>授权码</th><th>状态</th><th>使用用户</th><th>备注</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(r, idx) in codeRows" :key="r.id">
-              <td class="mono">C{{ String(idx + 1).padStart(3, '0') }}</td>
+            <tr v-for="r in codeRows" :key="r.id">
+              <td>{{ fmtDayTime(codeEventTime(r)) }}</td>
               <td class="mono">{{ r.code }}</td>
               <td><span class="status" :class="r.status === 'used' ? 'is-ok' : 'is-bad'">{{ r.status === 'used' ? '已使用' : '已作废' }}</span></td>
               <td>{{ r.used_by_username || '-' }}</td>
-              <td>{{ fmtDayTime(r.used_at) }}</td>
-              <td>{{ fmtDayTime(r.revoked_at) }}</td>
               <td>{{ r.note || '-' }}</td>
             </tr>
-            <tr v-if="loadingCode" class="empty-row"><td colspan="7">加载中...</td></tr>
-            <tr v-else-if="codeRows.length === 0" class="empty-row"><td colspan="7">暂无授权码日志</td></tr>
+            <tr v-if="loadingCode" class="empty-row"><td colspan="5">加载中...</td></tr>
+            <tr v-else-if="codeRows.length === 0" class="empty-row"><td colspan="5">暂无授权码日志</td></tr>
           </tbody>
         </table>
       </div>
@@ -102,23 +99,22 @@
         <table class="table">
           <thead>
             <tr>
-              <th>编号</th><th>用户名</th><th>token</th><th>目标</th><th>IP</th><th>状态码</th><th>结果</th><th>消息</th><th>时间</th>
+              <th>时间</th><th>用户名</th><th>token</th><th>目标</th><th>IP</th><th>状态码</th><th>结果</th><th>消息</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(r, idx) in subRows" :key="r.id">
-              <td class="mono">S{{ String(idx + 1).padStart(3, '0') }}</td>
+            <tr v-for="r in subRows" :key="r.id">
+              <td>{{ fmtDayTime(r.created_at) }}</td>
               <td>{{ r.username || '-' }}</td>
               <td class="mono">{{ maskToken(r.token) }}</td>
               <td>{{ r.target }}</td>
               <td>{{ r.ip }}</td>
               <td>{{ r.status_code }}</td>
               <td><span class="status" :class="r.success ? 'is-ok' : 'is-bad'">{{ r.success ? '成功' : '失败' }}</span></td>
-              <td>{{ r.message }}</td>
-              <td>{{ fmtDayTime(r.created_at) }}</td>
+              <td>{{ logMessageLabel(r.message) }}</td>
             </tr>
-            <tr v-if="loadingSub" class="empty-row"><td colspan="9">加载中...</td></tr>
-            <tr v-else-if="subRows.length === 0" class="empty-row"><td colspan="9">暂无订阅访问日志</td></tr>
+            <tr v-if="loadingSub" class="empty-row"><td colspan="8">加载中...</td></tr>
+            <tr v-else-if="subRows.length === 0" class="empty-row"><td colspan="8">暂无订阅访问日志</td></tr>
           </tbody>
         </table>
       </div>
@@ -134,24 +130,6 @@ import { api } from '../lib/api';
 type AuthRow = { id: string; username: string; action: string; success: boolean; message: string; ip: string; created_at: string };
 type CodeRow = { id: string; code: string; status: 'used' | 'revoked' | string; used_by_username: string | null; used_at: string | null; revoked_at: string | null; note: string | null };
 type SubRow = { id: string; username: string | null; token: string; target: string; ip: string; status_code: number; success: boolean; message: string; created_at: string };
-
-const mockAuthRows: AuthRow[] = [
-  { id: 'a1', username: 'admin', action: 'admin_login', success: true, message: 'login success', ip: '192.168.10.21', created_at: '2026-06-02T09:10:00+08:00' },
-  { id: 'a2', username: 'alice001', action: 'user_login', success: false, message: 'password mismatch', ip: '192.168.10.36', created_at: '2026-06-02T09:16:00+08:00' },
-  { id: 'a3', username: 'bob_user', action: 'user_login', success: true, message: 'login success', ip: '192.168.10.51', created_at: '2026-06-02T09:22:00+08:00' }
-];
-
-const mockCodeRows: CodeRow[] = [
-  { id: 'c1', code: 'H1PT9Q', status: 'used', used_by_username: 'alice001', used_at: '2026-06-01T18:20:00+08:00', revoked_at: null, note: '新用户首充' },
-  { id: 'c2', code: '92SAZZ', status: 'revoked', used_by_username: null, used_at: null, revoked_at: '2026-06-01T20:05:00+08:00', note: '误发作废' },
-  { id: 'c3', code: 'EPY226', status: 'used', used_by_username: 'bob_user', used_at: '2026-06-02T08:11:00+08:00', revoked_at: null, note: null }
-];
-
-const mockSubRows: SubRow[] = [
-  { id: 's1', username: 'alice001', token: 'subtk_a1b2c3d4e5f6g7h8', target: 'clash', ip: '192.168.10.36', status_code: 200, success: true, message: 'ok', created_at: '2026-06-02T08:32:00+08:00' },
-  { id: 's2', username: 'bob_user', token: 'subtk_z9y8x7w6v5u4t3s2', target: 'mihomo', ip: '192.168.10.51', status_code: 429, success: false, message: 'rate limited', created_at: '2026-06-02T08:33:00+08:00' },
-  { id: 's3', username: null, token: 'subtk_xxxxxyyyyyzzzz', target: 'sing-box', ip: '192.168.10.88', status_code: 401, success: false, message: 'invalid token', created_at: '2026-06-02T08:39:00+08:00' }
-];
 
 const tab = ref<'auth' | 'code' | 'sub'>('auth');
 const error = ref('');
@@ -182,6 +160,42 @@ function maskToken(token: string) {
   return `${token.slice(0, 6)}...${token.slice(-4)}`;
 }
 
+function codeEventTime(row: CodeRow) {
+  return row.used_at || row.revoked_at;
+}
+
+function authActionLabel(action: string) {
+  const labels: Record<string, string> = {
+    admin_login: '管理员登录',
+    user_login: '用户登录',
+    register: '用户注册',
+    logout: '退出登录',
+    user_change_password: '用户修改密码',
+    admin_change_password: '管理员修改密码'
+  };
+  return labels[action] || action;
+}
+
+function logMessageLabel(message: string) {
+  const labels: Record<string, string> = {
+    ok: '成功',
+    registered: '注册成功',
+    redeemed: '兑换成功',
+    renewed: '续期成功',
+    'password updated': '密码已更新',
+    'old password incorrect': '原密码错误',
+    'invalid credentials or disabled': '用户名或密码错误，或账号已禁用',
+    'login locked by rate limit': '登录失败次数过多，请稍后再试',
+    'register ip limit exceeded': '注册过于频繁，请稍后再试',
+    'username already exists': '用户名已存在',
+    'Turnstile token required': '请完成 Turnstile 验证',
+    'Turnstile secret key not configured': 'Turnstile 密钥未配置',
+    'Turnstile verification failed': 'Turnstile 验证失败',
+    'Turnstile request error': 'Turnstile 验证请求失败'
+  };
+  return labels[message] || message || '-';
+}
+
 function buildQuery(obj: Record<string, string>) {
   const q = new URLSearchParams();
   Object.entries(obj).forEach(([k, v]) => { if (String(v || '').trim()) q.set(k, String(v).trim()); });
@@ -193,11 +207,11 @@ async function loadAuth() {
   try {
     const query = buildQuery({ ...filters.auth, limit: '100' });
     const res = await api<{ items: AuthRow[] }>(`/api/admin/logs/auth${query ? `?${query}` : ''}`);
-    authRows.value = (res.items && res.items.length > 0) ? res.items : mockAuthRows;
+    authRows.value = res.items || [];
     error.value = '';
   } catch (e) {
-    error.value = `读取登录日志失败，已切换演示数据：${(e as Error).message}`;
-    authRows.value = mockAuthRows;
+    error.value = `读取登录日志失败：${(e as Error).message}`;
+    authRows.value = [];
   } finally {
     loadingAuth.value = false;
   }
@@ -208,11 +222,11 @@ async function loadCode() {
   try {
     const query = buildQuery({ ...filters.code, limit: '100' });
     const res = await api<{ items: CodeRow[] }>(`/api/admin/logs/code-usage${query ? `?${query}` : ''}`);
-    codeRows.value = (res.items && res.items.length > 0) ? res.items : mockCodeRows;
+    codeRows.value = res.items || [];
     error.value = '';
   } catch (e) {
-    error.value = `读取授权码日志失败，已切换演示数据：${(e as Error).message}`;
-    codeRows.value = mockCodeRows;
+    error.value = `读取授权码日志失败：${(e as Error).message}`;
+    codeRows.value = [];
   } finally {
     loadingCode.value = false;
   }
@@ -223,11 +237,11 @@ async function loadSub() {
   try {
     const query = buildQuery({ ...filters.sub, limit: '100' });
     const res = await api<{ items: SubRow[] }>(`/api/admin/logs/sub-access${query ? `?${query}` : ''}`);
-    subRows.value = (res.items && res.items.length > 0) ? res.items : mockSubRows;
+    subRows.value = res.items || [];
     error.value = '';
   } catch (e) {
-    error.value = `读取订阅访问日志失败，已切换演示数据：${(e as Error).message}`;
-    subRows.value = mockSubRows;
+    error.value = `读取订阅访问日志失败：${(e as Error).message}`;
+    subRows.value = [];
   } finally {
     loadingSub.value = false;
   }

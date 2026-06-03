@@ -5,10 +5,9 @@
         <h1>上游管理</h1>
         <p class="sub">上游订阅地址维护、启用状态与连通性测试。</p>
       </div>
-      <span class="badge" v-if="usingMock">演示数据 {{ items.length }} 条</span>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="notice" class="notice" :class="noticeKind">{{ notice }}</p>
 
     <div class="filters">
       <input v-model="qName" placeholder="筛选上游名称" />
@@ -17,6 +16,7 @@
         <option value="enabled">启用</option>
         <option value="disabled">禁用</option>
       </select>
+      <button type="button" class="test-btn" :disabled="batching" @click="runAllTests">{{ batching ? '测试中...' : '全部测试' }}</button>
       <button type="button" class="add-btn" @click="openAdd">新增上游</button>
     </div>
 
@@ -24,26 +24,41 @@
       <table class="table">
         <thead>
           <tr>
-            <th>编号</th>
             <th>名称</th>
             <th>状态</th>
             <th>上游URL</th>
+            <th>链接类型</th>
             <th>最后测试</th>
             <th>更新时间</th>
             <th>操作区</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(u, idx) in filteredItems" :key="u.id">
-            <td class="mono">U{{ String(idx + 1).padStart(3, '0') }}</td>
+          <tr v-for="u in filteredItems" :key="u.id">
             <td class="name">{{ u.name }}</td>
             <td><span class="status" :class="u.enabled ? 'is-enabled' : 'is-disabled'">{{ u.enabled ? '启用' : '禁用' }}</span></td>
             <td class="url" :title="u.url">{{ u.url_masked || u.url }}</td>
-            <td>{{ u.last_test_result || '-' }}</td>
+            <td>{{ sourceTypeLabel(u.source_type) }}</td>
+            <td>
+              <span
+                v-if="u.test_state === 'testing'"
+                class="test-pill is-testing"
+              >
+                测试中
+              </span>
+              <span
+                v-else-if="u.last_test_status"
+                class="test-pill"
+                :class="u.last_test_ok ? 'is-pass' : 'is-fail'"
+                :title="u.last_test_message || ''"
+              >
+                HTTP {{ u.last_test_status }}
+              </span>
+              <span v-else class="test-pill is-unknown">-</span>
+            </td>
             <td>{{ fmtDay(u.updated_at) }}</td>
             <td>
               <div class="actions">
-                <button type="button" @click="runTest(u)">测试</button>
                 <button type="button" @click="openEdit(u)">修改</button>
                 <button type="button" class="warn" @click="toggleEnabled(u)">{{ u.enabled ? '禁用' : '启用' }}</button>
                 <button type="button" class="danger" @click="openDelete(u)">删除</button>
@@ -65,6 +80,11 @@
         </div>
         <div class="modal-form">
           <label>名称<input v-model="editForm.name" placeholder="例如：主线路A" /></label>
+          <label>链接类型
+            <select v-model="editForm.sourceType">
+              <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </label>
           <label>上游URL<input v-model="editForm.url" placeholder="https://example.com/sub?token=..." /></label>
           <label>备注<textarea v-model="editForm.note" rows="3" placeholder="可选"></textarea></label>
         </div>
@@ -91,39 +111,57 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
-import { api } from '../lib/api';
+import { API_BASE, api } from '../lib/api';
 
 type Item = {
   id: string;
   name: string;
   enabled: boolean;
+  source_type: string;
   url: string;
   url_masked?: string;
   note?: string;
-  last_test_result?: string | null;
+  last_test_ok?: boolean | null;
+  last_test_status?: number | null;
+  last_test_type?: string | null;
+  last_test_node_count?: number | null;
+  last_test_message?: string | null;
+  test_state?: 'idle' | 'testing' | 'pass' | 'fail';
   updated_at: string;
 };
 
-const mockItems: Item[] = [
-  { id: 'up-1', name: '主线路A', enabled: true, url: 'https://provider-a.example.com/sub?token=abc123', url_masked: 'https://provider-a.example.com/sub?...', note: '默认线路', last_test_result: '200 OK (120ms)', updated_at: '2026-06-01' },
-  { id: 'up-2', name: '备用线路B', enabled: true, url: 'https://provider-b.example.com/subscribe?id=8899', url_masked: 'https://provider-b.example.com/subscribe?...', note: '备用', last_test_result: '200 OK (240ms)', updated_at: '2026-05-31' },
-  { id: 'up-3', name: '海外线路C', enabled: false, url: 'https://provider-c.example.net/subscription/x', url_masked: 'https://provider-c.example.net/subscription/...', note: '', last_test_result: 'timeout', updated_at: '2026-05-30' }
-];
-
 const items = ref<Item[]>([]);
-const error = ref('');
-const usingMock = ref(false);
+const notice = ref('');
+const noticeKind = ref<'info' | 'success' | 'error'>('info');
 const qName = ref('');
 const qStatus = ref('');
+const batching = ref(false);
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const editOpen = ref(false);
 const editing = ref(false);
 const target = ref<Item | null>(null);
 const confirmOpen = ref(false);
 
-const editForm = ref({ name: '', url: '', note: '' });
+const editForm = ref({ name: '', url: '', note: '', sourceType: 'auto' });
+
+const sourceTypeOptions = [
+  { value: 'auto', label: '自动识别' },
+  { value: 'ss', label: 'SS' },
+  { value: 'trojan', label: 'Trojan' },
+  { value: 'vmess', label: 'Vmess' },
+  { value: 'vless', label: 'Vless' },
+  { value: 'hysteria2', label: 'Hysteria2' },
+  { value: 'tuic', label: 'Tuic' },
+  { value: 'base64', label: 'Base64' },
+  { value: 'clash_yaml', label: 'Clash YAML' }
+];
+
+function sourceTypeLabel(value: string) {
+  return sourceTypeOptions.find((option) => option.value === value)?.label || value || '自动识别';
+}
 
 const filteredItems = computed(() => items.value.filter((u) => {
   const okName = qName.value ? u.name.toLowerCase().includes(qName.value.toLowerCase()) : true;
@@ -142,37 +180,49 @@ function fmtDay(value: string | null | undefined) {
 function openAdd() {
   editing.value = false;
   target.value = null;
-  editForm.value = { name: '', url: '', note: '' };
+  editForm.value = { name: '', url: '', note: '', sourceType: 'auto' };
   editOpen.value = true;
 }
 
 function openEdit(u: Item) {
   editing.value = true;
   target.value = u;
-  editForm.value = { name: u.name, url: u.url, note: u.note || '' };
+  editForm.value = { name: u.name, url: u.url, note: u.note || '', sourceType: u.source_type || 'auto' };
   editOpen.value = true;
 }
 
-function submitEdit() {
+async function submitEdit() {
   const name = editForm.value.name.trim();
   const url = editForm.value.url.trim();
   if (!name || !url) return;
-  if (editing.value && target.value) {
-    items.value = items.value.map((u) => (u.id === target.value!.id ? { ...u, name, url, url_masked: maskUrl(url), note: editForm.value.note.trim(), updated_at: fmtDay(new Date().toISOString()) } : u));
-  } else {
-    items.value.unshift({
-      id: `up-new-${Date.now()}`,
-      name,
-      enabled: true,
-      url,
-      url_masked: maskUrl(url),
-      note: editForm.value.note.trim(),
-      last_test_result: '-',
-      updated_at: fmtDay(new Date().toISOString())
-    });
-    usingMock.value = true;
+  try {
+    if (editing.value && target.value) {
+      await api(`/api/admin/upstreams/${target.value.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name,
+          provider: editForm.value.note.trim() || 'custom',
+          sourceType: editForm.value.sourceType,
+          sourceUrl: url
+        })
+      });
+    } else {
+      await api('/api/admin/upstreams', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          provider: editForm.value.note.trim() || 'custom',
+          sourceType: editForm.value.sourceType,
+          sourceUrl: url
+        })
+      });
+    }
+    await loadUpstreams();
+    editOpen.value = false;
+  } catch (e) {
+    notice.value = `保存失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
   }
-  editOpen.value = false;
 }
 
 function maskUrl(url: string) {
@@ -184,14 +234,14 @@ function maskUrl(url: string) {
   }
 }
 
-function runTest(u: Item) {
-  const ok = Math.random() > 0.25;
-  const result = ok ? `200 OK (${80 + Math.floor(Math.random() * 200)}ms)` : 'timeout';
-  items.value = items.value.map((x) => (x.id === u.id ? { ...x, last_test_result: result, updated_at: fmtDay(new Date().toISOString()) } : x));
-}
-
-function toggleEnabled(u: Item) {
-  items.value = items.value.map((x) => (x.id === u.id ? { ...x, enabled: !x.enabled, updated_at: fmtDay(new Date().toISOString()) } : x));
+async function toggleEnabled(u: Item) {
+  try {
+    await api(`/api/admin/upstreams/${u.id}/${u.enabled ? 'disable' : 'enable'}`, { method: 'POST' });
+    await loadUpstreams();
+  } catch (e) {
+    notice.value = `状态更新失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
+  }
 }
 
 function openDelete(u: Item) {
@@ -199,26 +249,177 @@ function openDelete(u: Item) {
   confirmOpen.value = true;
 }
 
-function submitDelete() {
+async function submitDelete() {
   if (!target.value) return;
-  items.value = items.value.filter((u) => u.id !== target.value!.id);
-  confirmOpen.value = false;
-  target.value = null;
+  try {
+    await api(`/api/admin/upstreams/${target.value.id}`, { method: 'DELETE' });
+    await loadUpstreams();
+    confirmOpen.value = false;
+    target.value = null;
+  } catch (e) {
+    notice.value = `删除失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
+  }
+}
+
+async function runAllTests() {
+  if (batching.value) return;
+  batching.value = true;
+  notice.value = '测试中...';
+  noticeKind.value = 'info';
+  items.value = items.value.map((item) => ({
+    ...item,
+    test_state: item.enabled ? 'testing' : (item.last_test_status ? (item.last_test_ok ? 'pass' : 'fail') : 'idle')
+  }));
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/admin/upstreams/test-all`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!resp.ok || !resp.body) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.message || `HTTP ${resp.status}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const handleLine = (line: string) => {
+      const payload = JSON.parse(line) as
+        | {
+            kind: 'result';
+            id: string;
+            ok: boolean;
+            status: number | null;
+            error: string | null;
+            type: string | null;
+            nodeCount: number | null;
+            message: string | null;
+            last_test_ok: boolean;
+            last_test_status: number | null;
+            last_test_error: string | null;
+            last_test_type: string | null;
+            last_test_node_count: number | null;
+            last_test_message: string | null;
+          }
+        | {
+            kind: 'summary';
+            total: number;
+            success: number;
+            failed: number;
+            nodeCount: number;
+          };
+
+      if (payload.kind === 'result') {
+        const targetItem = items.value.find((item) => item.id === payload.id);
+        if (targetItem) {
+          targetItem.last_test_ok = payload.last_test_ok;
+          targetItem.last_test_status = payload.last_test_status;
+          targetItem.last_test_type = payload.last_test_type;
+          targetItem.last_test_node_count = payload.last_test_node_count;
+          targetItem.last_test_message = payload.last_test_message;
+          targetItem.test_state = payload.ok ? 'pass' : 'fail';
+        }
+        return;
+      }
+
+      notice.value = payload.nodeCount === 0
+        ? `测试完成：共 ${payload.total} 条订阅，${payload.success} 条成功，共 0 个节点，节点池为空但已 ready`
+        : `测试完成：共 ${payload.total} 条订阅，${payload.success} 条成功，共 ${payload.nodeCount} 个节点，节点池已 ready`;
+      noticeKind.value = payload.failed > 0 ? 'error' : 'success';
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) handleLine(line);
+        newlineIndex = buffer.indexOf('\n');
+      }
+    }
+
+    const tail = buffer.trim();
+    if (tail) handleLine(tail);
+  } catch (e) {
+    notice.value = `测试失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
+  } finally {
+    batching.value = false;
+    items.value = items.value.map((item) => ({
+      ...item,
+      test_state: item.enabled ? ((item.last_test_status ? (item.last_test_ok ? 'pass' : 'fail') : 'idle')) : 'idle'
+    }));
+  }
+}
+
+async function loadUpstreams() {
+  try {
+    const data = await api<{
+      items: any[];
+      batch_test_running?: boolean;
+      batch_test_ready?: boolean;
+      batch_test_message?: string;
+      batch_test_total?: number;
+      batch_test_success?: number;
+      batch_test_failed?: number;
+      batch_test_node_count?: number;
+    }>('/api/admin/upstreams');
+    batching.value = !!data.batch_test_running;
+    if (data.batch_test_running) {
+      notice.value = '测试中...';
+      noticeKind.value = 'info';
+    } else if (data.batch_test_ready && data.batch_test_message) {
+      const nodeCount = Number(data.batch_test_node_count || 0);
+      const success = Number(data.batch_test_success || 0);
+      const total = Number(data.batch_test_total || 0);
+      notice.value = nodeCount === 0
+        ? `节点池为空，但已 ready（${success}/${total} 成功）`
+        : `节点池已 ready（${success}/${total} 成功，共 ${nodeCount} 个节点）`;
+      noticeKind.value = 'success';
+    } else {
+      notice.value = '';
+    }
+    items.value = (data.items || []).map((i) => ({
+      id: i.id,
+      name: i.name,
+      enabled: !!i.enabled,
+      source_type: i.source_type || 'auto',
+      url: i.source_url || '',
+      url_masked: i.source_url_masked || '',
+      note: i.provider || '',
+      last_test_ok: i.last_test_ok ?? null,
+      last_test_status: i.last_test_status ?? null,
+      last_test_type: i.last_test_type || null,
+      last_test_node_count: i.last_test_node_count ?? null,
+      last_test_message: i.last_test_message || null,
+      test_state: i.last_test_status ? (i.last_test_ok ? 'pass' : 'fail') : 'idle',
+      updated_at: i.updated_at || ''
+    }));
+  } catch (e) {
+    notice.value = `接口读取失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
+    items.value = [];
+  }
 }
 
 onMounted(async () => {
-  try {
-    const data = await api<{ items: Item[] }>('/api/admin/upstreams');
-    if (data.items?.length) {
-      items.value = data.items;
-      return;
-    }
-    items.value = mockItems;
-    usingMock.value = true;
-  } catch (e) {
-    error.value = `接口读取失败，已切换演示数据：${(e as Error).message}`;
-    items.value = mockItems;
-    usingMock.value = true;
+  await loadUpstreams();
+  refreshTimer = setInterval(() => {
+    void loadUpstreams();
+  }, 5000);
+});
+
+onBeforeUnmount(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
 });
 </script>
@@ -228,11 +429,15 @@ onMounted(async () => {
 h1 { margin: 0; color: #0f172a; }
 .sub { margin: 6px 0 0; color: #64748b; }
 .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
-.error { color: #b91c1c; margin: 0 0 10px; }
-
-.filters { display: grid; grid-template-columns: 1fr 180px 110px; gap: 8px; margin-bottom: 12px; }
+.notice { margin: 0 0 10px; font-size: 14px; }
+.notice.info { color: #1d4ed8; }
+.notice.success { color: #15803d; }
+.notice.error { color: #b91c1c; }
+.filters { display: grid; grid-template-columns: 1fr 180px 110px 110px; gap: 8px; margin-bottom: 12px; }
 .filters input,.filters select,.filters button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
 .filters button { min-width: 96px; white-space: nowrap; }
+.filters .test-btn { border-color: #f59e0b !important; background: #fbbf24 !important; color: #7c2d12 !important; font-weight: 600; cursor: pointer; }
+.filters .test-btn:disabled { opacity: 0.7; cursor: wait; }
 .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff !important; font-weight: 600; cursor: pointer; }
 
 .table-wrap { overflow-x: auto; }
@@ -247,6 +452,22 @@ tbody tr:hover { background: #f3f7ff; }
 .status { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
 .status.is-enabled { background: #ecfdf3; color: #15803d; }
 .status.is-disabled { background: #e5e7eb; color: #374151; }
+.test-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  border: 1px solid transparent;
+}
+.test-pill.is-pass { background: #ecfdf3; color: #15803d; border-color: #bbf7d0; }
+.test-pill.is-fail { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.test-pill.is-testing { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.test-pill.is-unknown { background: #f8fafc; color: #64748b; border-color: #e2e8f0; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actions button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.2; min-width: 52px; cursor: pointer; }
@@ -261,6 +482,7 @@ tbody tr:hover { background: #f3f7ff; }
 .modal-form { display: grid; gap: 10px; padding: 14px 16px; }
 .modal-form label { display: grid; gap: 6px; font-size: 13px; color: #334155; }
 .modal-form input,.modal-form textarea { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
+.modal-form select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
 .modal-form textarea { resize: vertical; }
 .modal-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
 .modal-foot { margin-top: 0; border-top: 1px solid #e2e8f0; padding: 12px 16px; background: #f8faff; }

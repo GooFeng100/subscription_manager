@@ -8,5 +8,10 @@ export function boolFromEnv(value: string | undefined, defaultValue: boolean) {
 }
 
 export function generateSubToken() {
-  return crypto.randomBytes(24).toString("hex");
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  for (let i = 0; i < 10; i += 1) {
+    out += chars[crypto.randomInt(0, chars.length)];
+  }
+  return out;
 }

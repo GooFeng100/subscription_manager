@@ -1,7 +1,7 @@
 import { env } from "../config/env.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
 
-export type TurnstileScene = "admin_login" | "user_login" | "register" | "redeem";
+export type TurnstileScene = "admin_login" | "user_login" | "register";
 
 function sceneEnabled(scene: TurnstileScene, settings: Awaited<ReturnType<typeof getRuntimeSettings>>) {
   if (!settings.turnstile_enabled) {
@@ -13,7 +13,7 @@ function sceneEnabled(scene: TurnstileScene, settings: Awaited<ReturnType<typeof
   if (scene === "register") {
     return settings.register_turnstile_enabled;
   }
-  return settings.redeem_turnstile_enabled;
+  return false;
 }
 
 export async function verifyTurnstile(scene: TurnstileScene, token?: string) {
@@ -24,7 +24,7 @@ export async function verifyTurnstile(scene: TurnstileScene, token?: string) {
   if (!token) {
     return { ok: false as const, message: "Turnstile token required" };
   }
-  const secret = settings.turnstile_secret_key || env.TURNSTILE_SECRET_KEY;
+  const secret = env.TURNSTILE_SECRET_KEY;
   if (!secret) {
     return { ok: false as const, message: "Turnstile secret key not configured" };
   }
