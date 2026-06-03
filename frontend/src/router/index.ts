@@ -42,17 +42,19 @@ router.beforeEach(async (to) => {
   }
 
   if (publicPaths.has(to.path)) {
-    // Public pages should not trigger /api/auth/me on forced refresh,
-    // avoiding unnecessary 401 noise in browser console.
+    // Public pages should not trigger session checks on forced refresh,
+    // avoiding unnecessary noise in browser console.
     return true;
   }
 
-  let me: { userType: "admin" | "user"; dashboard: string } | null = null;
+  let me: { authenticated?: boolean; userType?: "admin" | "user"; dashboard?: string } | null = null;
   try {
-    const resp = await fetch("/api/auth/me", { credentials: "include" });
+    const resp = await fetch("/api/auth/session", { credentials: "include" });
     if (resp.ok) {
-      me = (await resp.json()) as { userType: "admin" | "user"; dashboard: string; sub_version?: string | null };
-      setBootMeCache(me);
+      me = (await resp.json()) as { authenticated?: boolean; userType?: "admin" | "user"; dashboard?: string; sub_version?: string | null };
+      if (me.authenticated) {
+        setBootMeCache(me as { userType: "admin" | "user"; dashboard: string; username?: string; status?: string; expire_at?: string | null; disable_after?: string | null; sub_token?: string | null; sub_version?: string | null });
+      }
     }
   } catch {
     me = null;

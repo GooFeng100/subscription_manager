@@ -6,6 +6,103 @@
 
 ## Round Goal
 
+复测云服务器与 NAS 本地在同一上游链接下的差异，确认线上测试返回 HTTP 403 的根因。
+
+## Project Current Status
+
+- 云服务器直接请求上游链接时返回 `HTTP/2 403`，响应头显示 `server: cloudflare`，正文为 Cloudflare 的访问受限页面。
+- NAS 本地通过 OpenClash 出口访问同一链接时返回 `HTTP/2 200`，说明上游本身并非完全不可用，而是**对云服务器出口 IP / 机房网络特征做了限制**。
+- 这次差异与前端、节点解析或分类逻辑无关，属于上游风控 / 出口网络差异问题。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/lib/upstream-testing.ts`
+- `sed -n '1,260p' backend/src/routes/stage3.ts`
+- `sed -n '1,260p' backend/src/lib/subscription-conversion.ts`
+- `sed -n '1,260p' backend/src/services/upstream-batch-runner.ts`
+- `sed -n '1,240p' backend/src/lib/redis.ts`
+- `sed -n '1,220p' backend/src/config/env.ts`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- `/admin/upstreams/:id/test` 在云服务器环境下会把上游 HTTP 403 判定为测试失败。
+
+## Validation Result
+
+- 云服务器测试：`HTTP/2 403`
+- NAS 本地 OpenClash 测试：`HTTP/2 200`
+
+## Notes / Blockers
+
+- 当前阻塞点在上游对云服务器出口的限制，不在本项目解析或转换代码。
+
+## Next Step
+
+- 如需继续推进，可考虑为上游抓取增加可切换出口（代理/中转抓取），或把上游测试与刷新仍放在可通的出口环境执行。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
+排查正式站点上游测试在云服务器环境下返回 HTTP 403、但 NAS 本地测试正常的差异原因。
+
+## Project Current Status
+
+- 线上 `/admin/upstreams/:id/test` 与批量测试在云服务器环境返回 HTTP 403。
+- NAS 本地同一批上游链接测试正常，节点池可达 `ready (2/2 成功，共 153 个节点)`。
+- 当前最可能的差异点是云服务器出口 IP / ASN / 地域触发了上游供应商风控，而不是前端或本地解析逻辑。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/lib/upstream-testing.ts`
+- `sed -n '1,260p' backend/src/routes/stage3.ts`
+- `sed -n '1,260p' backend/src/lib/subscription-conversion.ts`
+- `sed -n '1,260p' backend/src/services/upstream-batch-runner.ts`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `sed -n '1,240p' backend/src/lib/redis.ts`
+- `sed -n '1,220p' backend/src/config/env.ts`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- 接口未改动。
+
+## Validation Result
+
+- 代码层测试逻辑确认：`/admin/upstreams/:id/test` 直接将上游 HTTP 403 记为测试失败。
+- 当前现象与云服务器出口网络环境相关性高。
+
+## Notes / Blockers
+
+- 需要在云服务器侧进一步核实出口 IP / 网络环境是否被上游供应商限制。
+
+## Next Step
+
+- 建议在云服务器上直接用 `curl -A Shadowrocket` 复测对应上游 URL，和 NAS 本地的出口 IP 行为做对比；必要时再评估是否需要代理/中转抓取方案。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
 修复生产站点前端在 HTTPS 页面下仍请求 NAS 本地 `http://192.168.10.3:8084/config` 的 Mixed Content / CORS 问题，并准备上传代码。
 
 ## Project Current Status
@@ -4576,3 +4673,601 @@
 ### 下一步建议
 - 若你确认人工项已全部完成，就可以进入正式上线窗口。
 - 如果还没完成，建议先逐项打勾，再上线。
+
+---
+
+## 2026-06-03 - 上游代理回退实现
+
+### 当前目标
+- 为上游测试增加“直连失败后代理回退”的最小实现，缓解云服务器出口被上游 Cloudflare/WAF 拒绝导致的 403 问题。
+
+### 完成情况
+- 已完成后端上游测试代理回退逻辑。
+- 已完成管理端上游列表的 `代理回退` 开关与展示。
+- 已将单条测试、批量测试接入同一套回退逻辑。
+
+### 修改文件
+- Updated: `backend/src/lib/upstream-testing.ts`
+- Updated: `backend/src/routes/stage3.ts`
+- Updated: `backend/src/services/upstream-batch-runner.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/config/env.ts`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `compose.yaml`
+- Updated: `docker-compose.yml`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `sed -n '1,260p' backend/src/lib/upstream-testing.ts`
+- `sed -n '1,260p' backend/src/routes/stage3.ts`
+- `sed -n '1,220p' backend/src/services/upstream-batch-runner.ts`
+- `sed -n '1,260p' frontend/src/pages/AdminUpstreamsPage.vue`
+- `sed -n '1,220p' backend/src/lib/db.ts`
+- `sed -n '1,220p' backend/src/config/env.ts`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+
+### Docker / 容器状态
+- 本轮未重建容器。
+
+### API / 接口状态
+- `/admin/upstreams/:id/test` 已支持直连失败后的代理回退。
+- `/admin/upstreams/test-all` 已支持直连失败后的代理回退。
+- `UPSTREAM_FETCH_PROXY_URL` 为可选配置，仅在需要回退出口时启用。
+
+### 验证结果
+- 后端构建通过。
+- 前端构建通过。
+
+### 遗留问题
+- 代理回退仍依赖外部可用出口（例如 NAS/OpenWrt 上可达的代理），云服务器直连依然可能被上游拒绝。
+
+### 下一步建议
+- 若需要继续验证，可在生产环境填入 `UPSTREAM_FETCH_PROXY_URL` 后，复测单条上游与批量测试是否从 403 回退为 200。
+
+---
+
+## 2026-06-03 - 上游代理回退需求收口
+
+### 当前目标
+- 取消“代理名称”设计，改为系统设置中的“上游拉取代理地址”，并补齐代理连通性测试按钮。
+
+### 完成情况
+- 已删除代理名称相关设计口径，统一为 `UPSTREAM_FETCH_PROXY_URL` / `上游拉取代理地址`。
+- 已在系统设置页增加“上游拉取代理地址”输入框与“测试代理连通性”按钮。
+- 已新增后端接口 `POST /api/admin/settings/test-upstream-proxy`。
+- 已保留环境变量作为兜底，并明确系统设置优先、环境变量次之。
+- 已保留每条上游的 `fetch_via_proxy` 开关，批量测试与自动轮询仍共用同一条逻辑链路。
+
+### 修改文件
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `backend/src/lib/upstream-testing.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/routes/stage3.ts`
+- Updated: `backend/src/services/upstream-batch-runner.ts`
+- Updated: `backend/package.json`
+- Added: `backend/package-lock.json`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `README.md`
+- Updated: `docs/DEPLOYMENT.md`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `sed -n '1,260p' .codex/skills/subscription-manager-project/SKILL.md`
+- `sed -n '1,260p' backend/src/routes/stage7.ts`
+- `sed -n '1,260p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '1,220p' frontend/src/lib/api.ts`
+- `sed -n '1,260p' backend/src/lib/runtime-settings.ts`
+- `grep -RIn "代理名称\\|upstream_fetch_proxy_name\\|proxyName" . --exclude-dir=node_modules --exclude-dir=dist`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+
+### Docker / 容器状态
+- 本轮未重建容器。
+
+### API / 接口状态
+- 新增 `POST /api/admin/settings/test-upstream-proxy`。
+- 系统设置页可保存 `upstream_fetch_proxy_url`，保存后立即生效。
+
+### 验证结果
+- 后端构建通过。
+- 前端构建通过。
+- 代码中未发现代理名称相关残留口径。
+
+### 遗留问题
+- 代理连通性仍依赖外部可用出口（例如 NAS/OpenWrt 上的代理服务）。
+
+### 下一步建议
+- 在生产环境补入系统设置代理地址后，直接复测代理连通性按钮和上游批量测试。
+
+---
+
+## 2026-06-03 - 上游代理回退联调验收
+
+### 当前目标
+- 验证系统设置“上游拉取代理地址”、代理连通性测试按钮、上游代理回退与批量测试链路是否联通。
+
+### 完成情况
+- 已重建并重启 `app` / `caddy`，使最新代码在运行容器中生效。
+- 已通过管理员登录（使用 Turnstile 测试 token）进入系统设置页。
+- 已验证系统设置可保存 `upstream_fetch_proxy_url`，并可立即读取回显。
+- 已验证 `/api/admin/settings/test-upstream-proxy` 可返回代理连通性测试结果，成功时可拿到出口 IP 与耗时。
+- 已验证上游单条测试与批量测试均携带 `last_test_via_proxy` 字段，且代理回退后会在结果里保留该标记。
+- 已验证 `fetch_via_proxy=true` 的上游在测试结果中会记录代理回退路径。
+- 已恢复临时测试设置，不保留联调用代理地址与临时上游标记。
+
+### 修改文件
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `backend/src/lib/upstream-testing.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/routes/stage3.ts`
+- Updated: `backend/src/services/upstream-batch-runner.ts`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `README.md`
+- Updated: `docs/DEPLOYMENT.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `docker compose up -d --build app caddy`
+- `curl http://127.0.0.1:8084/config`
+- `curl -c /tmp/sm.cookie -d '{\"username\":\"admin\",\"password\":\"admin123456\",\"turnstileToken\":\"1x0000000000000000000000000000000AA\"}' http://127.0.0.1:8084/api/auth/login`
+- `curl -b /tmp/sm.cookie http://127.0.0.1:8084/api/admin/settings`
+- `curl -b /tmp/sm.cookie -X PUT http://127.0.0.1:8084/api/admin/settings`
+- `curl -b /tmp/sm.cookie -X POST http://127.0.0.1:8084/api/admin/settings/test-upstream-proxy`
+- `curl -b /tmp/sm.cookie -X PATCH http://127.0.0.1:8084/api/admin/upstreams/:id`
+- `curl -b /tmp/sm.cookie -X POST http://127.0.0.1:8084/api/admin/upstreams/:id/test`
+- `curl -b /tmp/sm.cookie -X POST http://127.0.0.1:8084/api/admin/upstreams/test-all`
+- `docker compose ps`
+- `curl -i http://127.0.0.1:8084/health`
+
+### Docker / 容器状态
+- `app`、`caddy` 已重新构建并重启。
+- `mongodb`、`redis`、`subconverter` 保持运行。
+
+### API / 接口状态
+- 系统设置页新增的 `upstream_fetch_proxy_url` 可保存并立即生效。
+- `POST /api/admin/settings/test-upstream-proxy` 可用。
+- 单条测试与批量测试均携带代理回退结果标记。
+
+### 验证结果
+- `backend` 构建通过。
+- `frontend` 构建通过。
+- 系统设置保存通过。
+- 代理连通性测试通过。
+- 单条上游测试通过。
+- 批量测试通过。
+- `/health` 正常，`/config` 正常。
+
+### 遗留问题
+- 当前联调用的是临时代理容器；生产环境仍需填入真实可达的 `UPSTREAM_FETCH_PROXY_URL`，否则代理回退仍会失败。
+
+### 下一步建议
+- 在正式环境补入真实代理地址后，再做一次云服务器直连失败、代理回退成功的最终联调。
+
+---
+
+## 2026-06-03 - 上游代理回退 UI 收口
+
+### 当前目标
+- 将上游代理相关交互收口为：全局代理地址默认值、测试地址输入、列表内开关切换，并保持代理回退链路不变。
+
+### 完成情况
+- 系统设置页的“上游拉取代理地址”默认值已统一为 `http://100.69.223.58:17890`，并保留可编辑覆盖。
+- 系统设置页的代理连通性测试区域已拆成两个元素：测试地址输入框 + 测试按钮。
+- 上游列表中的“代理回退”已改为可直接在列表内操作的开关按钮，不再使用勾选框。
+- 上游编辑弹窗中的代理回退也已改为开关按钮。
+- `UPSTREAM_FETCH_PROXY_URL` 相关环境样例与部署文档已同步默认地址说明。
+- `compose` 运行容器已重建并重启，前端最新资源已生效。
+
+### 修改文件
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `README.md`
+- Updated: `docs/DEPLOYMENT.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+- `curl -i http://127.0.0.1:8084/health`
+- `curl -s http://127.0.0.1:8084/config`
+
+### Docker / 容器状态
+- `app`、`caddy` 已基于最新代码重建并运行。
+- `mongodb`、`redis`、`subconverter` 继续保持健康运行。
+
+### API / 接口状态
+- 代理测试接口仍可用。
+- 上游列表与编辑弹窗的 `fetch_via_proxy` 开关行为保持不变。
+
+### 验证结果
+- `backend` 构建通过。
+- `frontend` 构建通过。
+- `docker compose ps` 正常。
+- `/health` 正常。
+- `/config` 正常。
+
+### 遗留问题
+- 代理连通性仍依赖外部可达出口；若生产环境未配置代理地址，代理回退仍不会生效。
+
+### 下一步建议
+- 在正式环境再次确认系统设置里的默认代理地址与实际可达出口一致，并对一条 `fetch_via_proxy=true` 的上游做一次批量测试验收。
+
+---
+
+## 2026-06-03 - 上游代理 UI 收口与 tinyproxy 口径澄清
+
+### 当前目标
+- 按页面反馈收口上游代理相关 UI：取消重复测试地址输入、列表代理改为无外框开关，并明确测试结果中的代理标记含义。
+
+### 完成情况
+- 系统设置页已取消重复的“测试地址”独立输入项，保留“代理连通性测试”区块内的测试地址输入框 + 按钮组合。
+- 上游列表中的“代理回退”已改为无胶囊外框的开关样式按钮，可直接在列表内切换。
+- 上游编辑弹窗中的“代理回退”也已收敛为开关样式按钮。
+- 测试结果中的“代理回退”标记已明确为“最后一次测试使用了代理回退路径”。
+- 上游拉取代理地址默认值继续统一为 `http://100.69.223.58:17890`。
+- 文档已补充说明：上游拉取代理可由 NAS 上独立运行的 tinyproxy/HTTP 代理服务提供，不纳入本仓库 Docker Compose 管理。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `README.md`
+- Updated: `docs/DEPLOYMENT.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+- `curl -i http://127.0.0.1:8084/health`
+- `curl -s http://127.0.0.1:8084/config`
+
+### Docker / 容器状态
+- `app`、`caddy` 已基于最新代码重建并运行。
+- `mongodb`、`redis`、`subconverter` 保持健康运行。
+
+### API / 接口状态
+- 系统设置的代理地址保存与测试接口仍可用。
+- 上游列表代理回退开关保存与批量测试链路保持不变。
+
+### 验证结果
+- `backend` 构建通过。
+- `frontend` 构建通过。
+- `docker compose ps` 正常。
+- `/health` 正常。
+- `/config` 正常。
+
+### 遗留问题
+- 代理连通性仍依赖外部可达出口；若 NAS 上的 tinyproxy/HTTP 代理服务未部署或不可达，代理回退不会生效。
+
+### 下一步建议
+- 若要正式启用代理回退，请先在 NAS 上部署独立 tinyproxy/HTTP 代理服务，再回到系统设置页面做连通性测试。
+
+---
+
+## 2026-06-03 - 上游测试结果 UI 收口
+
+### 当前目标
+- 将上游列表中的测试结果展示收口为：测试中、代理、直连三种明确状态。
+
+### 完成情况
+- 上游列表的测试结果列在执行批量测试时继续显示黄色“测试中”胶囊。
+- 测试完成后，结果列现在按最终路径显示“代理”或“直连”，不再显示容易歧义的“代理回退”。
+- 上游代理回退开关仍保留为列表内可直接操作的开关样式，不影响链路逻辑。
+- 系统设置页仍保留上游拉取代理地址与代理连通性测试区块，未改变链路。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix frontend`
+
+### 验证结果
+- 前端构建通过。
+- 上游列表 UI 的测试结果状态展示已按“测试中 / 代理 / 直连”收口。
+
+### 遗留问题
+- 无。
+
+### 下一步建议
+- 刷新上游管理页确认最终展示文案与样式是否符合预期；如果需要，再微调“代理 / 直连”胶囊尺寸和颜色。
+
+---
+
+## 2026-06-03 - 上游测试失败态结果补显
+
+### 当前目标
+- 修正上游列表中失败测试项被误显示为 `-` 的问题，并保证失败时也能看到最终走的是代理还是直连。
+
+### 完成情况
+- 上游列表的测试结果判定改为以 `last_test_ok` 为主，不再仅依赖 `last_test_status`。
+- 对于失败但没有 HTTP 状态码的情况，列表现在会显示红色“失败”胶囊。
+- 失败项仍会显示路径胶囊，明确是“代理”还是“直连”。
+- 测试中的黄色胶囊逻辑保持不变。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix frontend`
+- `docker compose up -d --build caddy`
+
+### 验证结果
+- 前端构建通过。
+- `caddy` 已重建并生效。
+
+### 遗留问题
+- 若后端返回的失败结果缺少 HTTP 状态码，列表会显示“失败”而不是具体 HTTP 码；这是预期行为。
+
+### 下一步建议
+- 刷新上游管理页，确认失败项是否已按“失败 + 代理/直连”显示。
+
+---
+
+## 2026-06-03 - 上游测试结果按返回码与路径收口
+
+### 当前目标
+- 保证上游测试结果列在成功、失败、测试中三种状态下都能明确展示“返回码 + 代理/直连路径”。
+
+### 完成情况
+- 将上游测试结果列的完成态显示固定为返回码格式，失败时也显示返回码样式，不再用纯文案替代。
+- 测试完成后，路径胶囊继续显示“代理”或“直连”。
+- 测试中的黄色胶囊仍保持，但不会再附带旧的代理/直连路径，避免误导。
+- 未测试项仍显示 `-`。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix frontend`
+- `docker compose up -d --build caddy`
+
+### 验证结果
+- 前端构建通过。
+- `caddy` 已重建并生效。
+
+### 遗留问题
+- 若失败结果没有 HTTP 状态码，前端会按 `HTTP 0` 显示，以保持“返回码”展示一致性。
+
+### 下一步建议
+- 刷新上游管理页确认：测试中显示黄色“测试中”，完成态显示绿色/红色返回码，并在旁边显示“代理 / 直连”。
+
+---
+
+## 2026-06-03 - 上游测试路径在测试中可见
+
+### 当前目标
+- 让上游列表的测试结果列在测试中、成功、失败三种状态下都明确显示当前正在使用的连接方式。
+
+### 完成情况
+- 测试结果列现在在“测试中”阶段也会显示路径胶囊，路径固定按当前实际连接方式显示为“直连”或“代理”。
+- 完成态继续显示最终返回码，并在旁边显示最终路径“直连”或“代理”。
+- 路径胶囊不再等测试结束后才出现，测试过程中就能看到当前正在走哪条链路。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix frontend`
+- `docker cp frontend/dist/. subscription-manager-caddy:/srv/`
+- `docker compose restart caddy`
+
+### 验证结果
+- 前端构建通过。
+- `caddy` 已重启并加载最新静态资源。
+
+### 遗留问题
+- 无。
+
+### 下一步建议
+- 刷新上游管理页，确认“测试中”时路径胶囊是否随当前连接方式一起显示。
+
+---
+
+## 2026-06-03 - 上游测试路径胶囊提亮
+
+### 当前目标
+- 提升上游测试结果列中“直连 / 代理”路径胶囊的可读性和视觉辨识度。
+
+### 完成情况
+- “直连 / 代理”胶囊已统一为更醒目的高对比样式。
+- 直连与代理现在都保留清晰的边框、背景与文字对比，便于在测试中和测试完成后快速识别当前路径。
+
+### 修改文件
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix frontend`
+- `docker cp frontend/dist/. subscription-manager-caddy:/srv/`
+- `docker compose restart caddy`
+
+### 验证结果
+- 前端构建通过。
+- `caddy` 已重启并加载最新静态资源。
+
+### 遗留问题
+- 无。
+
+### 下一步建议
+- 刷新上游管理页，确认“直连 / 代理”胶囊在测试中和完成态都更容易被一眼看清。
+
+---
+
+## 2026-06-03 - 代理连通性测试补充出口地区
+
+### 当前目标
+- 让系统设置页的代理连通性测试结果在出口 IP 后面补充国家/地区信息，方便快速判断代理出口位置。
+
+### 完成情况
+- 代理连通性测试成功时，结果现在会显示 `出口 IP + 国家/地区`，例如 `45.62.172.83 香港`。
+- 前端成功提示保持单行展示，失败提示仍保持明确原因。
+- 代理连通性测试仍然只用于上游拉取代理地址，不影响用户订阅分发链路。
+
+### 修改文件
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker cp backend/dist/. subscription-manager-app:/app/dist/`
+- `docker cp frontend/dist/. subscription-manager-caddy:/srv/`
+- `docker compose restart app caddy`
+
+### 验证结果
+- 后端构建通过。
+- 前端构建通过。
+- `app` 与 `caddy` 已重启并加载最新产物。
+
+### 遗留问题
+- 国家/地区信息依赖外部地理查询服务；若该服务不可用，页面仍只显示出口 IP。
+
+### 下一步建议
+- 在系统设置页重新点一次“测试代理连通性”，确认出口 IP 后是否追加了地区信息。
+
+---
+
+## 2026-06-03 - 代理连通性测试地理源切换
+
+### 当前目标
+- 解决代理测试成功后地区信息不稳定或不显示的问题，让前端更稳定地展示出口 IP 后的地区标签。
+
+### 完成情况
+- 代理连通性测试的地理查询源已切换为更稳定的 `ip-api.com` HTTP 接口。
+- 成功时会对常见国家/地区做中文映射，例如 `Hong Kong -> 香港`。
+- 前端成功提示仍保持同一行展示，若地理信息可用，则会追加显示在出口 IP 后。
+
+### 修改文件
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `docker cp backend/dist/. subscription-manager-app:/app/dist/`
+- `docker compose restart app`
+
+### 验证结果
+- 后端构建通过。
+- `app` 已重启并加载最新后端产物。
+
+### 遗留问题
+- 地理查询仍依赖外部服务；若该服务失败，则页面只显示出口 IP，不影响连通性判断。
+
+### 下一步建议
+- 在系统设置页重新执行“测试代理连通性”，确认是否能看到 `出口 IP：xxx 香港` 这类展示。
+
+---
+
+## 2026-06-03 - 代理测试结果与会话读取无错误化
+
+### 当前目标
+- 优化系统设置页的代理连通性测试展示，并减少浏览器中由预期状态引起的错误噪音。
+
+### 完成情况
+- 代理连通性测试成功时，第一行只显示 `代理连通正常 · HTTP 状态：200 · 耗时：xxx ms`。
+- 第二行单独显示 `出口 IP：45.62.172.83 香港 Yau Tsim Mong Tsim Sha Tsui` 这类信息。
+- 代理连通性测试失败时，第一行直接显示 `代理连通失败：原因`，不再额外输出多余文案。
+- `api/auth/session` 已作为前端会话读取的 200 接口，替代页面里原先直接依赖的 401 读取路径，减少控制台里预期状态造成的错误噪音。
+
+### 修改文件
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/components/admin/AdminLayout.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/router/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker cp backend/dist/. subscription-manager-app:/app/dist/`
+- `docker cp frontend/dist/. subscription-manager-caddy:/srv/`
+- `docker compose restart app caddy`
+
+### 验证结果
+- 后端构建通过。
+- 前端构建通过。
+- `app` 与 `caddy` 已重启并加载最新产物。
+
+### 遗留问题
+- 浏览器对于某些预期的 401/400 网络响应仍可能在 DevTools 网络面板显示；当前已尽量通过 `session` 接口和 200 返回收敛页面侧可见噪音。
+
+### 下一步建议
+- 刷新系统设置页与登录页，确认代理测试结果文案和会话读取行为是否符合预期。
+
+---
+
+## 2026-06-03 - 代理测试结果文案与会话接口收口
+
+### 当前目标
+- 让代理连通性测试与会话读取在前端表现上尽量安静、明确，减少预期失败带来的浏览器噪音。
+
+### 完成情况
+- 代理连通性测试结果现在按两行展示：
+  - 第一行：`代理连通正常 · HTTP 状态：200 · 耗时：xxx ms`
+  - 第二行：`出口 IP：45.62.172.83 香港 Yau Tsim Mong Tsim Sha Tsui`
+- 代理测试失败时，第一行直接显示 `代理连通失败：原因`，不再额外展示多余说明。
+- 新增 `GET /api/auth/session` 作为 200 会话读取接口，前端登录后跳转、后台用户名展示、仪表盘刷新与路由守卫都改为优先使用该接口，减少预期的 401 噪音。
+
+### 修改文件
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/components/admin/AdminLayout.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/router/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+### 命令
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker cp backend/dist/. subscription-manager-app:/app/dist/`
+- `docker cp frontend/dist/. subscription-manager-caddy:/srv/`
+- `docker compose restart app caddy`
+
+### 验证结果
+- 后端构建通过。
+- 前端构建通过。
+- `app` 与 `caddy` 已重启并加载最新产物。
+
+### 遗留问题
+- 浏览器 DevTools 对网络响应状态仍可能有内部提示；当前已尽量通过 200 会话接口与 200 代理测试响应收敛前端可见噪音。
+
+### 下一步建议
+- 刷新登录页、仪表盘和系统设置页，确认会话读取与代理测试展示是否符合预期。

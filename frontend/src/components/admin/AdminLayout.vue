@@ -48,8 +48,8 @@ const userInitial = computed(() => (username.value ? username.value[0].toUpperCa
 
 onMounted(async () => {
   try {
-    const me = await api<{ username?: string }>('/api/auth/me');
-    username.value = me.username || '';
+    const me = await api<{ authenticated?: boolean; username?: string }>('/api/auth/session');
+    username.value = me.authenticated ? (me.username || '') : '';
   } catch {
     username.value = '';
   }

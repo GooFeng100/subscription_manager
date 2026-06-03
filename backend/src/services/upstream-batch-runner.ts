@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { env } from "../config/env.js";
 import { adminsCol, rotationLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { redis } from "../lib/redis.js";
 import { countNodeProtocols, maskUrlForLog, maskToken } from "../lib/subscription-conversion.js";
 import { getUpstreamBatchState, setUpstreamBatchState } from "../lib/upstream-batch-state.js";
@@ -14,6 +15,15 @@ const BATCH_LOCK_TTL_SECONDS = 60 * 30;
 export type UpstreamBatchTrigger = "manual" | "auto";
 
 export type UpstreamBatchRunEvent =
+  | {
+      kind: "phase";
+      id: string;
+      name: string;
+      provider: string;
+      source_type: string;
+      phase: "direct" | "proxy";
+      source_url_masked: string;
+    }
   | {
       kind: "result";
       id: string;
@@ -34,6 +44,7 @@ export type UpstreamBatchRunEvent =
       last_test_type: string | null;
       last_test_node_count: number | null;
       last_test_message: string | null;
+      last_test_via_proxy: boolean;
       last_test_at: string;
     }
   | {
@@ -138,6 +149,7 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
     const docs = await upstreamsCol().find({ enabled: true }).sort({ updated_at: -1 }).toArray();
     docsCount = docs.length;
     startedAt = new Date().toISOString();
+    const runtimeSettings = await getRuntimeSettings();
     await setUpstreamBatchState({
       running: true,
       ready: false,
@@ -159,7 +171,20 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
         name: doc.name,
         provider: doc.provider,
         source_type: doc.source_type || "auto",
-        source_url: doc.source_url
+        source_url: doc.source_url,
+        fetch_via_proxy: !!doc.fetch_via_proxy,
+        upstream_fetch_proxy_url: runtimeSettings.upstream_fetch_proxy_url,
+        onPhase: (phase) => {
+          options.onEvent?.({
+            kind: "phase",
+            id: String(doc._id),
+            name: doc.name,
+            provider: doc.provider,
+            source_type: doc.source_type || "auto",
+            phase,
+            source_url_masked: maskUrlForLog(doc.source_url)
+          });
+        }
       });
 
       if (result.ok) {
@@ -182,6 +207,7 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
             last_test_type: result.type,
             last_test_node_count: result.nodeCount,
             last_test_message: result.message,
+            last_test_via_proxy: result.usedProxy,
             last_test_at: now,
             updated_at: now
           }
@@ -208,6 +234,7 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
         last_test_type: result.type,
         last_test_node_count: result.nodeCount,
         last_test_message: result.message,
+        last_test_via_proxy: result.usedProxy,
         last_test_at: now.toISOString()
       });
     }

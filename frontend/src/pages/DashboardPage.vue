@@ -135,7 +135,11 @@ async function refresh() {
         sub_version: cached.sub_version ?? null
       };
     } else {
-      me.value = await api<Me>("/api/auth/me");
+      const session = await api<Me & { authenticated?: boolean }>("/api/auth/session");
+      if (!session.authenticated) {
+        throw new Error("未登录");
+      }
+      me.value = session;
     }
     msg.value = "已刷新";
     error.value = false;

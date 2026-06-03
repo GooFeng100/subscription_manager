@@ -1,10 +1,14 @@
 import { Router } from "express";
+import { createRequire } from "node:module";
+import { isIP } from "node:net";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/require-role.js";
 import { activationCodesCol, authLogsCol, subAccessLogsCol } from "../lib/db.js";
 import { getRuntimeSettings, updateRuntimeSettings } from "../lib/runtime-settings.js";
 
 const router = Router();
+const require = createRequire(import.meta.url);
+const { ProxyAgent } = require("undici") as { ProxyAgent: new (url: string) => { close?: () => Promise<void>; destroy?: () => void } };
 
 const settingsUpdateSchema = z.object({
   registration_enabled: z.boolean().optional(),
@@ -13,6 +17,7 @@ const settingsUpdateSchema = z.object({
   converter_default_config_url: z.string().optional(),
   subscription_filename_template: z.string().optional(),
   upstream_poll_interval_minutes: z.number().int().nonnegative().optional(),
+  upstream_fetch_proxy_url: z.string().optional(),
   sub_rate_limit_per_minute: z.number().int().positive().optional(),
   login_fail_limit: z.number().int().positive().optional(),
   login_lock_minutes: z.number().int().positive().optional(),
@@ -72,6 +77,150 @@ router.put("/admin/settings", requireAdmin, async (req, res) => {
   }
   const updated = await updateRuntimeSettings(parsed.data);
   return res.json({ message: "updated", settings: updated });
+});
+
+function maskProxyUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const auth = parsed.username || parsed.password ? "***@" : "";
+    return `${parsed.protocol}//${auth}${parsed.host}`;
+  } catch {
+    return "***";
+  }
+}
+
+const locationLabelMap: Record<string, string> = {
+  "Hong Kong": "香港",
+  Taiwan: "台湾",
+  Japan: "日本",
+  Singapore: "新加坡",
+  "South Korea": "韩国",
+  "North Korea": "朝鲜",
+  "United States": "美国",
+  Canada: "加拿大",
+  Australia: "澳大利亚",
+  "United Kingdom": "英国",
+  Germany: "德国",
+  France: "法国",
+  Netherlands: "荷兰",
+  Italy: "意大利",
+  Spain: "西班牙",
+  India: "印度",
+  Vietnam: "越南",
+  Thailand: "泰国",
+  Turkey: "土耳其",
+  Israel: "以色列",
+  Malaysia: "马来西亚",
+  Brazil: "巴西",
+  Chile: "智利",
+  Argentina: "阿根廷",
+  SouthAfrica: "南非"
+};
+
+function normalizeLocationLabel(value: string | undefined | null) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return locationLabelMap[trimmed] || trimmed;
+}
+
+async function lookupExitIpLocation(exitIp: string, signal: AbortSignal) {
+  if (!isIP(exitIp)) return null;
+  try {
+    const resp = await fetch(`http://ip-api.com/json/${encodeURIComponent(exitIp)}?fields=status,country,regionName,city,message`, {
+      method: "GET",
+      signal
+    } as RequestInit);
+    if (!resp.ok) return null;
+    const data = await resp.json() as {
+      status?: string;
+      country?: string;
+      regionName?: string;
+      city?: string;
+      message?: string;
+    };
+    if (data.status !== "success") return null;
+    const country = normalizeLocationLabel(data.country);
+    const region = normalizeLocationLabel(data.regionName);
+    const city = normalizeLocationLabel(data.city);
+    const location = [country, region, city]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    return location || null;
+  } catch {
+    return null;
+  }
+}
+
+router.post("/admin/settings/test-upstream-proxy", requireAdmin, async (req, res) => {
+  const proxyUrl = String(req.body?.proxyUrl || "").trim();
+  const testUrl = String(req.body?.testUrl || "https://api.ipify.org").trim();
+  const timeoutMs = Number(req.body?.timeoutMs || 10000);
+  if (!proxyUrl) {
+    return res.json({ ok: false, message: "请先填写上游拉取代理地址" });
+  }
+  if (!/^https?:\/\/.+/i.test(proxyUrl) && !/^socks5h?:\/\/.+/i.test(proxyUrl)) {
+    return res.json({ ok: false, message: "请输入有效的 http/https/socks5 地址" });
+  }
+
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1000, Number.isFinite(timeoutMs) ? timeoutMs : 10000));
+  const dispatcher = new ProxyAgent(proxyUrl);
+  try {
+    const resp = await fetch(testUrl, {
+      method: "GET",
+      redirect: "follow",
+      signal: controller.signal,
+      dispatcher: dispatcher as never
+    } as RequestInit);
+    const elapsedMs = Date.now() - startedAt;
+    const exitIp = (await resp.text()).trim();
+    const exitIpLocation = await lookupExitIpLocation(exitIp, controller.signal);
+    if (!resp.ok) {
+      return res.json({
+        ok: false,
+        proxyUrlMasked: maskProxyUrl(proxyUrl),
+        testUrl,
+        elapsedMs,
+        errorType: "http_error",
+        message: `代理测试返回 HTTP ${resp.status}`
+      });
+    }
+    return res.json({
+      ok: true,
+      proxyUrlMasked: maskProxyUrl(proxyUrl),
+      testUrl,
+      httpStatus: resp.status,
+      elapsedMs,
+      exitIp,
+      exitIpLocation,
+      message: "代理连通性正常"
+    });
+  } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+    const message = controller.signal.aborted
+      ? "代理连接超时，请检查 NAS tinyproxy 是否启动、Tailscale 是否在线、端口是否允许 VPS 访问"
+      : error instanceof Error
+        ? error.message
+        : "代理测试失败";
+    return res.json({
+      ok: false,
+      proxyUrlMasked: maskProxyUrl(proxyUrl),
+      testUrl,
+      elapsedMs,
+      errorType: controller.signal.aborted ? "timeout" : "request_failed",
+      message
+    });
+  } finally {
+    clearTimeout(timeout);
+    if (dispatcher.close) {
+      await dispatcher.close().catch(() => dispatcher.destroy?.());
+    } else {
+      dispatcher.destroy?.();
+    }
+  }
 });
 
 router.get("/admin/logs/auth", requireAdmin, async (req, res) => {

@@ -388,6 +388,41 @@ router.get("/me", requireAuth, async (req, res) => {
   });
 });
 
+router.get("/session", async (req, res) => {
+  if (!req.session?.userId || !req.session?.userType || !req.session?.username) {
+    return res.json({ authenticated: false });
+  }
+
+  if (req.session.userType === "admin") {
+    return res.json({
+      authenticated: true,
+      userType: "admin",
+      username: req.session.username,
+      dashboard: "/admin/users"
+    });
+  }
+
+  const user = await usersCol().findOne({ _id: new ObjectId(req.session.userId) });
+  if (!user) {
+    return res.json({ authenticated: false });
+  }
+
+  const synced = await syncUserLifecycle(user as UserDoc & { _id: ObjectId });
+  const subVersion = await getCurrentSubVersion();
+
+  return res.json({
+    authenticated: true,
+    userType: "user",
+    username: synced.username,
+    dashboard: "/dashboard",
+    status: synced.status,
+    expire_at: synced.expire_at,
+    disable_after: synced.disable_after,
+    sub_token: synced.sub_token,
+    sub_version: subVersion.version
+  });
+});
+
 const authLogsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(200).default(50),
   username: z.string().trim().min(1).max(64).optional(),

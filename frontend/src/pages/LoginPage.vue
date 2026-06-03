@@ -108,7 +108,10 @@ async function submit() {
   }
 
   try {
-    const me = await api<Me>('/api/auth/me');
+    const me = await api<Me & { authenticated?: boolean }>('/api/auth/session');
+    if (!me.authenticated) {
+      throw new Error('登录成功，但获取会话失败，请刷新重试');
+    }
     msg.value = '登录成功，正在跳转...';
     msgType.value = 'ok';
     if (me.userType === 'admin') {

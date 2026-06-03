@@ -96,6 +96,15 @@
 - `SUB_CONVERTER_TIMEOUT_MS`
   - 上线前需确认
   - **修改后需重建/重启**：`app`
+- `UPSTREAM_FETCH_PROXY_URL`
+- `UPSTREAM_FETCH_PROXY_URL` 默认建议填 `http://100.69.223.58:17890`，也可由系统设置覆盖
+  - 代理服务本身应由 NAS 上独立运行的 tinyproxy/HTTP 代理提供，项目名为 `TailscaleProxy`，路径为 `/vol1/1000/docker/TailscaleProxy`
+  - `TailscaleProxy` 当前在 `tinyproxy.conf` 中写死放行 3 个 Tailscale IP，后续要增删设备直接改配置文件
+  - 上线前需确认
+  - 系统设置里的“上游拉取代理地址”会优先生效，环境变量仅作兜底
+  - **仅在需要上游代理回退时配置**
+  - **不能提交 Git**
+  - **修改后需重建/重启**：`app`
 
 ### 2.3 Turnstile
 

@@ -4,6 +4,7 @@ import { boolFromEnv } from "./utils.js";
 import { systemStateCol } from "./db.js";
 
 const SETTINGS_KEY = "runtime_settings";
+const DEFAULT_UPSTREAM_FETCH_PROXY_URL = "http://100.69.223.58:17890";
 
 const runtimeSettingsSchema = z.object({
   registration_enabled: z.boolean().default(boolFromEnv(env.REGISTRATION_ENABLED, true)),
@@ -14,6 +15,7 @@ const runtimeSettingsSchema = z.object({
     .default("https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini"),
   subscription_filename_template: z.string().default("{{username}}_V{{version}}"),
   upstream_poll_interval_minutes: z.number().int().nonnegative().default(env.UPSTREAM_POLL_INTERVAL_MINUTES),
+  upstream_fetch_proxy_url: z.string().default(env.UPSTREAM_FETCH_PROXY_URL || DEFAULT_UPSTREAM_FETCH_PROXY_URL),
   sub_rate_limit_per_minute: z.number().int().positive().default(env.SUB_RATE_LIMIT_PER_MINUTE),
   login_fail_limit: z.number().int().positive().default(env.LOGIN_FAIL_LIMIT),
   login_lock_minutes: z.number().int().positive().default(env.LOGIN_LOCK_MINUTES),

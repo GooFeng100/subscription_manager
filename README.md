@@ -12,6 +12,8 @@ Stage 1 auth foundation is now available in backend APIs.
 - `compose.yaml`: the only authoritative Docker Compose file
 - `docker-compose.yml`: historical leftover, not used for deployment
 
+The admin settings page can configure an optional **upstream fetch proxy address** for server-side upstream pulls. The default value is `http://100.69.223.58:17890`. That setting overrides `UPSTREAM_FETCH_PROXY_URL` from the environment; the env var remains a fallback only.
+
 ## Single domain/base-url variable
 
 Use `APP_BASE_URL` as the single source of truth for service base URL.

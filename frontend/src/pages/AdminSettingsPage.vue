@@ -85,6 +85,40 @@
     </section>
 
     <section class="panel">
+      <div class="panel-head"><h2>上游拉取代理</h2></div>
+      <div class="panel-body form-grid">
+        <label><span class="label-title">上游拉取代理地址</span>
+          <input
+            v-model="form.upstream_fetch_proxy_url"
+            placeholder="http://100.69.223.58:17890"
+            :class="{ 'is-error': !!fieldError.upstream_fetch_proxy_url }"
+            @focus="clearFieldError('upstream_fetch_proxy_url')"
+          />
+          <small v-if="fieldError.upstream_fetch_proxy_url" class="error-text">{{ fieldError.upstream_fetch_proxy_url }}</small>
+          <small>仅用于服务端拉取上游订阅。不会影响用户订阅分发、subconverter、MongoDB、Redis 或 Caddy。</small>
+        </label>
+        <label class="proxy-test-panel">
+          <span class="label-title">代理连通性测试</span>
+          <div class="proxy-test-row">
+            <input
+              v-model="proxyTestUrl"
+              placeholder="https://api.ipify.org"
+              :class="{ 'is-error': !!fieldError.proxy_test_url }"
+              @focus="clearFieldError('proxy_test_url')"
+            />
+            <button type="button" class="proxy-test-btn" :disabled="proxyTestRunning" @click="testUpstreamProxy">
+              {{ proxyTestRunning ? '测试中...' : '测试代理连通性' }}
+            </button>
+          </div>
+          <small v-if="fieldError.proxy_test_url" class="error-text">{{ fieldError.proxy_test_url }}</small>
+          <small v-if="proxyTestSummary" class="proxy-test-summary" :class="proxyTestKind">{{ proxyTestSummary }}</small>
+          <small v-if="proxyTestDetail" class="proxy-test-detail" :class="proxyTestKind">{{ proxyTestDetail }}</small>
+          <small v-if="!proxyTestSummary && !proxyTestDetail" class="proxy-test-hint">读取上方代理地址后，测试服务端是否能经由该代理访问外网。</small>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="panel-head"><h2>安全策略</h2></div>
       <div class="panel-body form-grid">
         <label><span class="label-title">登录失败阈值 <em class="req">*</em></span>
@@ -142,7 +176,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
-import { api } from '../lib/api';
+import { API_BASE, api } from '../lib/api';
 
 type Settings = {
   registration_enabled: boolean;
@@ -151,6 +185,7 @@ type Settings = {
   converter_default_config_url: string;
   subscription_filename_template: string;
   upstream_poll_interval_minutes: number;
+  upstream_fetch_proxy_url: string;
   sub_rate_limit_per_minute: number;
   login_fail_limit: number;
   login_lock_minutes: number;
@@ -163,6 +198,7 @@ type Settings = {
 };
 
 const defaultConverterBackendUrl = 'http://subconverter:25500/sub';
+const defaultUpstreamFetchProxyUrl = 'http://100.69.223.58:17890';
 
 const form = reactive<Settings & {
   use_custom_converter_backend_url: boolean;
@@ -173,6 +209,7 @@ const form = reactive<Settings & {
   converter_default_config_url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini',
   subscription_filename_template: '{{username}}_V{{version}}',
   upstream_poll_interval_minutes: 60,
+  upstream_fetch_proxy_url: defaultUpstreamFetchProxyUrl,
   sub_rate_limit_per_minute: 60,
   login_fail_limit: 5,
   login_lock_minutes: 15,
@@ -197,12 +234,18 @@ const msg = ref('');
 const msgType = ref<'ok' | 'bad' | ''>('');
 const error = ref('');
 const fieldError = reactive<Record<string, string>>({});
+const proxyTestRunning = ref(false);
+const proxyTestSummary = ref('');
+const proxyTestDetail = ref('');
+const proxyTestKind = ref<'ok' | 'bad' | ''>('');
+const proxyTestUrl = ref('https://api.ipify.org');
 
 function assignForm(v: Partial<Settings>) {
   Object.assign(form, v);
   const backendUrl = String(v.converter_backend_url || defaultConverterBackendUrl).trim();
   form.use_custom_converter_backend_url = backendUrl !== defaultConverterBackendUrl;
   form.converter_backend_url = form.use_custom_converter_backend_url ? backendUrl : defaultConverterBackendUrl;
+  form.upstream_fetch_proxy_url = String(v.upstream_fetch_proxy_url || defaultUpstreamFetchProxyUrl).trim();
 }
 
 async function load() {
@@ -235,6 +278,7 @@ async function save() {
       converter_default_config_url: String(form.converter_default_config_url || '').trim(),
       subscription_filename_template: String(form.subscription_filename_template || '').trim() || '{{username}}_V{{version}}',
       upstream_poll_interval_minutes: Math.max(0, Number(form.upstream_poll_interval_minutes) || 0),
+      upstream_fetch_proxy_url: String(form.upstream_fetch_proxy_url || defaultUpstreamFetchProxyUrl).trim(),
       sub_rate_limit_per_minute: Math.max(1, Number(form.sub_rate_limit_per_minute) || 1),
       login_fail_limit: Math.max(1, Number(form.login_fail_limit) || 1),
       login_lock_minutes: Math.max(1, Number(form.login_lock_minutes) || 1),
@@ -265,6 +309,55 @@ function clearFieldError(field: string) {
   fieldError[field] = '';
 }
 
+async function testUpstreamProxy() {
+  const proxyUrl = String(form.upstream_fetch_proxy_url || '').trim();
+  if (!proxyUrl) {
+    fieldError.upstream_fetch_proxy_url = '请先填写上游拉取代理地址';
+    proxyTestSummary.value = '请先填写上游拉取代理地址';
+    proxyTestDetail.value = '';
+    proxyTestKind.value = 'bad';
+    return;
+  }
+  const testUrl = String(proxyTestUrl.value || '').trim() || 'https://api.ipify.org';
+  if (!/^https?:\/\/.+/i.test(testUrl)) {
+    fieldError.proxy_test_url = '请输入有效的 http/https 地址';
+    proxyTestSummary.value = '请输入有效的测试地址';
+    proxyTestDetail.value = '';
+    proxyTestKind.value = 'bad';
+    return;
+  }
+  proxyTestRunning.value = true;
+  proxyTestSummary.value = '测试中...';
+  proxyTestDetail.value = '';
+  proxyTestKind.value = '';
+  try {
+    const resp = await fetch(`${API_BASE}/api/admin/settings/test-upstream-proxy`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proxyUrl,
+        testUrl,
+        timeoutMs: 10000
+      })
+    });
+    const res = await resp.json().catch(() => ({}));
+    proxyTestSummary.value = res.ok
+      ? `代理连通正常 · HTTP 状态：${res.httpStatus || 200} · 耗时：${res.elapsedMs || 0} ms`
+      : `代理连通失败：${res.message || `HTTP ${resp.status}`}`;
+    proxyTestDetail.value = res.ok
+      ? `出口 IP：${res.exitIp || '-'}${res.exitIpLocation ? ` ${res.exitIpLocation}` : ''}`
+      : '';
+    proxyTestKind.value = res.ok ? 'ok' : 'bad';
+  } catch (e) {
+    proxyTestSummary.value = `代理连通失败：${(e as Error).message}`;
+    proxyTestDetail.value = '';
+    proxyTestKind.value = 'bad';
+  } finally {
+    proxyTestRunning.value = false;
+  }
+}
+
 function setCustomConverterBackendEnabled(enabled: boolean) {
   form.use_custom_converter_backend_url = enabled;
   if (!enabled) {
@@ -287,6 +380,10 @@ function validateForm() {
   const defaultConfigUrl = String(form.converter_default_config_url || '').trim();
   if (defaultConfigUrl && !/^https?:\/\/.+/i.test(defaultConfigUrl)) fieldError.converter_default_config_url = '请输入有效的 http/https 地址';
   if (!String(form.subscription_filename_template || '').trim()) fieldError.subscription_filename_template = '请输入文件名模板';
+  const proxyUrl = String(form.upstream_fetch_proxy_url || '').trim();
+  if (proxyUrl && !/^(https?:\/\/|socks5h?:\/\/).+/i.test(proxyUrl)) fieldError.upstream_fetch_proxy_url = '请输入有效的代理地址';
+  const testUrl = String(proxyTestUrl.value || '').trim();
+  if (testUrl && !/^https?:\/\/.+/i.test(testUrl)) fieldError.proxy_test_url = '请输入有效的 http/https 地址';
   if (!validatePositiveInt(Number(form.upstream_poll_interval_minutes), 0, 10080)) fieldError.upstream_poll_interval_minutes = '范围 0~10080 分钟';
   if (!validatePositiveInt(Number(form.sub_rate_limit_per_minute), 1, 10000)) fieldError.sub_rate_limit_per_minute = '范围 1~10000 次/分钟';
   if (!validatePositiveInt(Number(form.login_fail_limit), 1, 1000)) fieldError.login_fail_limit = '范围 1~1000';
@@ -337,6 +434,36 @@ h1 { margin: 0; color: #0f172a; }
 }
 .switch-row input { width: 16px; height: 16px; margin: 0; }
 .switch-row span { line-height: 1; }
+.proxy-test-panel { align-content: start; }
+.proxy-test-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.proxy-test-row input { min-width: 0; }
+.proxy-test-btn {
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 8px;
+  padding: 0 12px;
+  min-height: 40px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.proxy-test-btn:hover { border-color: #60a5fa; background: #dbeafe; }
+.proxy-test-btn:disabled { opacity: 0.65; cursor: wait; }
+.proxy-test-btn:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+.proxy-test-detail.ok { color: #15803d; }
+.proxy-test-detail.bad { color: #b91c1c; }
+.proxy-test-summary { color: #0f172a; }
+.proxy-test-summary.ok { color: #15803d; }
+.proxy-test-summary.bad { color: #b91c1c; }
+.proxy-test-hint { color: #64748b; }
 
 .foot-actions { border: 1px solid #dbe3ef; background: #fff; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; gap: 8px; }
 .msg { margin: 0 auto 0 0; font-size: 13px; color: #64748b; }
@@ -351,5 +478,7 @@ h1 { margin: 0; color: #0f172a; }
   .form-grid { grid-template-columns: 1fr; }
   .foot-actions { flex-wrap: wrap; }
   .foot-actions button { flex: 1 1 auto; min-width: 96px; }
+  .proxy-test-row { grid-template-columns: 1fr; }
+  .proxy-test-btn { width: 100%; }
 }
 </style>

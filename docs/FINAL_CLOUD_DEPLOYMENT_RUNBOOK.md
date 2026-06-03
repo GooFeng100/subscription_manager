@@ -581,6 +581,7 @@ TURNSTILE_SECRET_KEY=replace-with-production-secret-key
 
 CONVERTER_BACKEND_URL=http://subconverter:25500/sub
 CONVERTER_SOURCE_SECRET=replace-with-internal-source-secret
+UPSTREAM_FETCH_PROXY_URL=http://100.69.223.58:17890
 
 SUB_RATE_LIMIT_PER_MINUTE=60
 UPSTREAM_POLL_INTERVAL_MINUTES=60
@@ -594,6 +595,9 @@ SUB_CONVERTER_TIMEOUT_MS=10000
 - 生产 `ADMIN_PASSWORD` 不能使用开发密码。
 - `SESSION_SECRET / CONVERTER_SOURCE_SECRET` 必须使用强随机值。
 - `TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY` 使用生产 key。
+- 系统设置里的“上游拉取代理地址”优先于环境变量；默认值为 `http://100.69.223.58:17890`，`UPSTREAM_FETCH_PROXY_URL` 仅作为兜底，例如指向 NAS tinyproxy。
+- 该 tinyproxy 应独立部署在 NAS 上的 `TailscaleProxy` 项目中，路径为 `/vol1/1000/docker/TailscaleProxy`。
+- `TailscaleProxy` 当前在 `tinyproxy.conf` 中写死放行 3 个 Tailscale IP，后续要增删设备直接改配置文件。
 
 ---
 
@@ -780,4 +784,3 @@ git push origin v2026.06.03-1
 5. 重新执行 `/health`、`/config`、客户端订阅验证。
 
 不要在回滚过程中清空数据卷，不要执行 `docker system prune`。
-

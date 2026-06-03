@@ -41,6 +41,13 @@ Required environment variables:
 - `SESSION_COOKIE_SECURE=true`
 - `SESSION_SECRET=...`
 
+Optional upstream proxy fallback:
+
+- The admin settings page can override the server-side upstream fetch proxy address at runtime. The default runtime value is `http://100.69.223.58:17890`.
+- That address is served by the external NAS project `TailscaleProxy` at `/vol1/1000/docker/TailscaleProxy`.
+- `TailscaleProxy` currently allows access from the 3 Tailscale IPs written in its `tinyproxy.conf`; future changes should be made directly in that config file.
+- `UPSTREAM_FETCH_PROXY_URL` remains an environment fallback when the system setting is empty.
+
 Recommended commands:
 
 ```bash

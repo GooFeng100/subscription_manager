@@ -8,3 +8,16 @@ backend/node_modules/
 *.cookies
 cookies.txt
 .codex/
+
+# Production external deployment files, do not commit
+.env
+.env.prod
+*.local
+docker-compose.prod.yml
+caddy/Caddyfile.prod
+SUBSCRIPTION_MANAGER_FINAL_DEPLOYMENT_RUNBOOK_MASTER.md
+mongodb-data/
+redis-data/
+caddy-data/
+caddy-config/
+backups/

@@ -28,6 +28,7 @@
             <th>状态</th>
             <th>上游URL</th>
             <th>链接类型</th>
+            <th>代理回退</th>
             <th>最后测试</th>
             <th>更新时间</th>
             <th>操作区</th>
@@ -40,6 +41,22 @@
             <td class="url" :title="u.url">{{ u.url_masked || u.url }}</td>
             <td>{{ sourceTypeLabel(u.source_type) }}</td>
             <td>
+              <button
+                type="button"
+                class="toggle-switch inline"
+                :class="u.fetch_via_proxy ? 'is-on' : 'is-off'"
+                :disabled="batching || !!proxyToggleBusy[u.id]"
+                role="switch"
+                :aria-checked="u.fetch_via_proxy"
+                @click="toggleFetchViaProxy(u)"
+              >
+                <span class="toggle-track" aria-hidden="true">
+                  <span class="toggle-thumb"></span>
+                </span>
+                <span class="toggle-text">{{ proxyToggleBusy[u.id] ? '保存中' : (u.fetch_via_proxy ? '开启' : '关闭') }}</span>
+              </button>
+            </td>
+            <td>
               <span
                 v-if="u.test_state === 'testing'"
                 class="test-pill is-testing"
@@ -47,14 +64,21 @@
                 测试中
               </span>
               <span
-                v-else-if="u.last_test_status"
+                v-else-if="u.test_state === 'pass' || u.test_state === 'fail'"
                 class="test-pill"
                 :class="u.last_test_ok ? 'is-pass' : 'is-fail'"
                 :title="u.last_test_message || ''"
               >
-                HTTP {{ u.last_test_status }}
+                HTTP {{ u.last_test_status ?? 0 }}
               </span>
-              <span v-else class="test-pill is-unknown">-</span>
+              <span
+                v-if="u.test_state === 'testing' || u.test_state === 'pass' || u.test_state === 'fail'"
+                class="proxy-run-pill"
+                :class="(((u.test_state === 'testing' ? u.current_test_via_proxy : u.last_test_via_proxy) ?? false) ? 'is-proxy' : 'is-direct')"
+              >
+                {{ ((u.test_state === 'testing' ? u.current_test_via_proxy : u.last_test_via_proxy) ?? false) ? '代理' : '直连' }}
+              </span>
+              <span v-if="u.test_state === 'idle' && u.last_test_ok === null && u.last_test_status === null" class="test-pill is-unknown">-</span>
             </td>
             <td>{{ fmtDay(u.updated_at) }}</td>
             <td>
@@ -66,7 +90,7 @@
             </td>
           </tr>
           <tr v-if="filteredItems.length === 0" class="empty-row">
-            <td colspan="7">暂无上游数据</td>
+            <td colspan="8">暂无上游数据</td>
           </tr>
         </tbody>
       </table>
@@ -84,6 +108,23 @@
             <select v-model="editForm.sourceType">
               <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
+          </label>
+          <label>
+            代理回退
+            <button
+              type="button"
+              class="toggle-switch"
+              :class="editForm.fetchViaProxy ? 'is-on' : 'is-off'"
+              role="switch"
+              :aria-checked="editForm.fetchViaProxy"
+              @click="editForm.fetchViaProxy = !editForm.fetchViaProxy"
+            >
+              <span class="toggle-track" aria-hidden="true">
+                <span class="toggle-thumb"></span>
+              </span>
+              <span class="toggle-text">{{ editForm.fetchViaProxy ? '开启' : '关闭' }}</span>
+            </button>
+            <small>直连连续失败后再走代理拉取。</small>
           </label>
           <label>上游URL<input v-model="editForm.url" placeholder="https://example.com/sub?token=..." /></label>
           <label>备注<textarea v-model="editForm.note" rows="3" placeholder="可选"></textarea></label>
@@ -120,6 +161,7 @@ type Item = {
   name: string;
   enabled: boolean;
   source_type: string;
+  fetch_via_proxy?: boolean;
   url: string;
   url_masked?: string;
   note?: string;
@@ -128,6 +170,8 @@ type Item = {
   last_test_type?: string | null;
   last_test_node_count?: number | null;
   last_test_message?: string | null;
+  last_test_via_proxy?: boolean | null;
+  current_test_via_proxy?: boolean | null;
   test_state?: 'idle' | 'testing' | 'pass' | 'fail';
   updated_at: string;
 };
@@ -138,6 +182,7 @@ const noticeKind = ref<'info' | 'success' | 'error'>('info');
 const qName = ref('');
 const qStatus = ref('');
 const batching = ref(false);
+const proxyToggleBusy = ref<Record<string, boolean>>({});
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const editOpen = ref(false);
@@ -145,7 +190,7 @@ const editing = ref(false);
 const target = ref<Item | null>(null);
 const confirmOpen = ref(false);
 
-const editForm = ref({ name: '', url: '', note: '', sourceType: 'auto' });
+const editForm = ref({ name: '', url: '', note: '', sourceType: 'auto', fetchViaProxy: false });
 
 const sourceTypeOptions = [
   { value: 'auto', label: '自动识别' },
@@ -180,15 +225,36 @@ function fmtDay(value: string | null | undefined) {
 function openAdd() {
   editing.value = false;
   target.value = null;
-  editForm.value = { name: '', url: '', note: '', sourceType: 'auto' };
+  editForm.value = { name: '', url: '', note: '', sourceType: 'auto', fetchViaProxy: false };
   editOpen.value = true;
 }
 
 function openEdit(u: Item) {
   editing.value = true;
   target.value = u;
-  editForm.value = { name: u.name, url: u.url, note: u.note || '', sourceType: u.source_type || 'auto' };
+  editForm.value = { name: u.name, url: u.url, note: u.note || '', sourceType: u.source_type || 'auto', fetchViaProxy: !!u.fetch_via_proxy };
   editOpen.value = true;
+}
+
+async function toggleFetchViaProxy(u: Item) {
+  if (proxyToggleBusy.value[u.id]) return;
+  const next = !u.fetch_via_proxy;
+  proxyToggleBusy.value[u.id] = true;
+  try {
+    const res = await api<{ item?: Partial<Item> }>(`/api/admin/upstreams/${u.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ fetchViaProxy: next })
+    });
+    u.fetch_via_proxy = res.item?.fetch_via_proxy ?? next;
+    if (res.item?.updated_at) u.updated_at = String(res.item.updated_at);
+    notice.value = `${u.name} 代理回退已${u.fetch_via_proxy ? '开启' : '关闭'}`;
+    noticeKind.value = 'success';
+  } catch (e) {
+    notice.value = `代理回退更新失败：${(e as Error).message}`;
+    noticeKind.value = 'error';
+  } finally {
+    proxyToggleBusy.value[u.id] = false;
+  }
 }
 
 async function submitEdit() {
@@ -203,7 +269,8 @@ async function submitEdit() {
           name,
           provider: editForm.value.note.trim() || 'custom',
           sourceType: editForm.value.sourceType,
-          sourceUrl: url
+          sourceUrl: url,
+          fetchViaProxy: editForm.value.fetchViaProxy
         })
       });
     } else {
@@ -213,7 +280,8 @@ async function submitEdit() {
           name,
           provider: editForm.value.note.trim() || 'custom',
           sourceType: editForm.value.sourceType,
-          sourceUrl: url
+          sourceUrl: url,
+          fetchViaProxy: editForm.value.fetchViaProxy
         })
       });
     }
@@ -267,10 +335,10 @@ async function runAllTests() {
   batching.value = true;
   notice.value = '测试中...';
   noticeKind.value = 'info';
-  items.value = items.value.map((item) => ({
-    ...item,
-    test_state: item.enabled ? 'testing' : (item.last_test_status ? (item.last_test_ok ? 'pass' : 'fail') : 'idle')
-  }));
+    items.value = items.value.map((item) => ({
+      ...item,
+      test_state: item.enabled ? 'testing' : (item.last_test_ok === null || item.last_test_ok === undefined ? 'idle' : (item.last_test_ok ? 'pass' : 'fail'))
+    }));
 
   try {
     const resp = await fetch(`${API_BASE}/api/admin/upstreams/test-all`, {
@@ -304,6 +372,16 @@ async function runAllTests() {
             last_test_type: string | null;
             last_test_node_count: number | null;
             last_test_message: string | null;
+            last_test_via_proxy: boolean;
+          }
+        | {
+            kind: 'phase';
+            id: string;
+            name: string;
+            provider: string;
+            source_type: string;
+            phase: 'direct' | 'proxy';
+            source_url_masked: string;
           }
         | {
             kind: 'summary';
@@ -321,7 +399,18 @@ async function runAllTests() {
           targetItem.last_test_type = payload.last_test_type;
           targetItem.last_test_node_count = payload.last_test_node_count;
           targetItem.last_test_message = payload.last_test_message;
+          targetItem.last_test_via_proxy = payload.last_test_via_proxy;
+          targetItem.current_test_via_proxy = null;
           targetItem.test_state = payload.ok ? 'pass' : 'fail';
+        }
+        return;
+      }
+
+      if (payload.kind === 'phase') {
+        const targetItem = items.value.find((item) => item.id === payload.id);
+        if (targetItem) {
+          targetItem.test_state = 'testing';
+          targetItem.current_test_via_proxy = payload.phase === 'proxy';
         }
         return;
       }
@@ -354,7 +443,8 @@ async function runAllTests() {
     batching.value = false;
     items.value = items.value.map((item) => ({
       ...item,
-      test_state: item.enabled ? ((item.last_test_status ? (item.last_test_ok ? 'pass' : 'fail') : 'idle')) : 'idle'
+      test_state: item.enabled ? (item.last_test_ok === null || item.last_test_ok === undefined ? 'idle' : (item.last_test_ok ? 'pass' : 'fail')) : 'idle',
+      current_test_via_proxy: null
     }));
   }
 }
@@ -394,12 +484,15 @@ async function loadUpstreams() {
       url: i.source_url || '',
       url_masked: i.source_url_masked || '',
       note: i.provider || '',
+      fetch_via_proxy: !!i.fetch_via_proxy,
       last_test_ok: i.last_test_ok ?? null,
       last_test_status: i.last_test_status ?? null,
       last_test_type: i.last_test_type || null,
       last_test_node_count: i.last_test_node_count ?? null,
       last_test_message: i.last_test_message || null,
-      test_state: i.last_test_status ? (i.last_test_ok ? 'pass' : 'fail') : 'idle',
+      last_test_via_proxy: i.last_test_via_proxy ?? null,
+      current_test_via_proxy: null,
+      test_state: i.last_test_ok === null || i.last_test_ok === undefined ? 'idle' : (i.last_test_ok ? 'pass' : 'fail'),
       updated_at: i.updated_at || ''
     }));
   } catch (e) {
@@ -468,6 +561,81 @@ tbody tr:hover { background: #f3f7ff; }
 .test-pill.is-fail { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 .test-pill.is-testing { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
 .test-pill.is-unknown { background: #f8fafc; color: #64748b; border-color: #e2e8f0; }
+.proxy-run-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  margin-left: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  background: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #93c5fd;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08);
+}
+.proxy-run-pill.is-direct {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.08);
+}
+.proxy-run-pill.is-proxy {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.1);
+}
+
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.toggle-switch.inline { min-width: 0; justify-content: flex-start; }
+.toggle-switch .toggle-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  flex: 0 0 auto;
+  transition: background 0.18s ease;
+}
+.toggle-switch .toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.24);
+  transition: transform 0.18s ease;
+}
+.toggle-switch.is-on { color: #1d4ed8; }
+.toggle-switch.is-on .toggle-track { background: #2563eb; }
+.toggle-switch.is-on .toggle-thumb { transform: translateX(14px); }
+.toggle-switch:hover { color: #1d4ed8; }
+.toggle-switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+.toggle-switch:disabled { opacity: 0.65; cursor: wait; box-shadow: none; }
+.toggle-switch .toggle-text { white-space: nowrap; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actions button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.2; min-width: 52px; cursor: pointer; }
@@ -484,6 +652,7 @@ tbody tr:hover { background: #f3f7ff; }
 .modal-form input,.modal-form textarea { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
 .modal-form select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
 .modal-form textarea { resize: vertical; }
+.modal-form label small { color: #64748b; }
 .modal-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
 .modal-foot { margin-top: 0; border-top: 1px solid #e2e8f0; padding: 12px 16px; background: #f8faff; }
 .modal-actions button { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; padding: 8px 12px; cursor: pointer; }

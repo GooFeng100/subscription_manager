@@ -82,6 +82,7 @@ export type UpstreamDoc = {
   provider: string;
   source_type: string;
   source_url: string;
+  fetch_via_proxy?: boolean;
   enabled: boolean;
   last_test_ok: boolean | null;
   last_test_status: number | null;
@@ -89,6 +90,7 @@ export type UpstreamDoc = {
   last_test_type?: string | null;
   last_test_node_count?: number | null;
   last_test_message?: string | null;
+  last_test_via_proxy?: boolean | null;
   last_test_at: Date | null;
   created_at: Date;
   updated_at: Date;

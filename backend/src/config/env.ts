@@ -27,6 +27,7 @@ const envSchema = z.object({
   SUB_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(60),
   UPSTREAM_POLL_INTERVAL_MINUTES: z.coerce.number().int().nonnegative().default(60),
   SUB_CONVERTER_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  UPSTREAM_FETCH_PROXY_URL: z.string().optional(),
   ADMIN_USERNAME: z.string().default("admin"),
   ADMIN_PASSWORD: z.string().default("admin123456")
 });

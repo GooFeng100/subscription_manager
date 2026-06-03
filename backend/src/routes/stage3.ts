@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/require-role.js";
 import { upstreamsCol } from "../lib/db.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { maskUrlForLog } from "../lib/subscription-conversion.js";
 import { testUpstreamSource } from "../lib/upstream-testing.js";
 import { getUpstreamBatchState } from "../lib/upstream-batch-state.js";
@@ -14,14 +15,16 @@ const upstreamSchema = z.object({
   name: z.string().trim().min(1).max(64),
   provider: z.string().trim().min(1).max(64),
   sourceType: z.enum(["auto", "ss", "trojan", "vmess", "vless", "hysteria2", "tuic", "clash_yaml", "base64"]).default("auto"),
-  sourceUrl: z.string().url()
+  sourceUrl: z.string().url(),
+  fetchViaProxy: z.boolean().default(false)
 });
 
 const updateUpstreamSchema = z.object({
   name: z.string().trim().min(1).max(64).optional(),
   provider: z.string().trim().min(1).max(64).optional(),
   sourceType: z.enum(["auto", "ss", "trojan", "vmess", "vless", "hysteria2", "tuic", "clash_yaml", "base64"]).optional(),
-  sourceUrl: z.string().url().optional()
+  sourceUrl: z.string().url().optional(),
+  fetchViaProxy: z.boolean().optional()
 });
 
 function maskUrl(url: string) {
@@ -40,6 +43,7 @@ function upstreamView(doc: {
   provider: string;
   source_type: string;
   source_url: string;
+  fetch_via_proxy?: boolean;
   enabled: boolean;
   last_test_ok: boolean | null;
   last_test_status: number | null;
@@ -47,6 +51,7 @@ function upstreamView(doc: {
   last_test_type?: string | null;
   last_test_node_count?: number | null;
   last_test_message?: string | null;
+  last_test_via_proxy?: boolean | null;
   last_test_at: Date | null;
   created_at: Date;
   updated_at: Date;
@@ -56,6 +61,7 @@ function upstreamView(doc: {
     name: doc.name,
     provider: doc.provider,
     source_type: doc.source_type || "auto",
+    fetch_via_proxy: !!doc.fetch_via_proxy,
     enabled: doc.enabled,
     source_url: doc.source_url,
     source_url_masked: maskUrl(doc.source_url),
@@ -65,6 +71,7 @@ function upstreamView(doc: {
     last_test_type: doc.last_test_type || null,
     last_test_node_count: doc.last_test_node_count || null,
     last_test_message: doc.last_test_message || null,
+    last_test_via_proxy: doc.last_test_via_proxy ?? null,
     last_test_at: doc.last_test_at,
     created_at: doc.created_at,
     updated_at: doc.updated_at
@@ -98,6 +105,7 @@ router.post("/admin/upstreams", requireAdmin, async (req, res) => {
     provider: parsed.data.provider,
     source_type: parsed.data.sourceType,
     source_url: parsed.data.sourceUrl,
+    fetch_via_proxy: parsed.data.fetchViaProxy ?? false,
     enabled: true,
     last_test_ok: null,
     last_test_status: null,
@@ -134,6 +142,9 @@ router.patch("/admin/upstreams/:id", requireAdmin, async (req, res) => {
   }
   if (parsed.data.sourceUrl !== undefined) {
     update.source_url = parsed.data.sourceUrl;
+  }
+  if (parsed.data.fetchViaProxy !== undefined) {
+    update.fetch_via_proxy = parsed.data.fetchViaProxy;
   }
   try {
     const doc = await upstreamsCol().findOneAndUpdate(
@@ -200,12 +211,15 @@ router.post("/admin/upstreams/:id/test", requireAdmin, async (req, res) => {
   if (!doc) {
     return res.status(404).json({ message: "Upstream not found" });
   }
+  const runtimeSettings = await getRuntimeSettings();
   const now = new Date();
   const result = await testUpstreamSource({
     name: doc.name,
     provider: doc.provider,
     source_type: doc.source_type || "auto",
-    source_url: doc.source_url
+    source_url: doc.source_url,
+    fetch_via_proxy: !!doc.fetch_via_proxy,
+    upstream_fetch_proxy_url: runtimeSettings.upstream_fetch_proxy_url
   });
   const ok = result.ok;
   await upstreamsCol().updateOne(
@@ -218,6 +232,7 @@ router.post("/admin/upstreams/:id/test", requireAdmin, async (req, res) => {
         last_test_type: result.type,
         last_test_node_count: result.nodeCount,
         last_test_message: result.message,
+        last_test_via_proxy: result.usedProxy,
         last_test_at: now,
         updated_at: now
       }
@@ -240,6 +255,7 @@ router.post("/admin/upstreams/:id/test", requireAdmin, async (req, res) => {
     status: result.status,
     type: result.type,
     nodeCount: result.nodeCount,
+    usedProxy: result.usedProxy,
     fetchedAt: result.fetchedAt,
     source_url_masked: maskUrlForLog(doc.source_url)
   });
