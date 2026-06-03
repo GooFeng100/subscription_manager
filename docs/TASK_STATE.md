@@ -6,6 +6,57 @@
 
 ## Round Goal
 
+完成 `scripts/nas-release.sh` 发布上传，并确保仓库可成功推送到 GitHub 远端。
+
+## Project Current Status
+
+- 发布脚本已修正为在没有新待提交改动时，仍可直接推送当前发布提交与 tag。
+- 本地发布 commit 已生成并推送到远端。
+- 本次发布 tag 已推送：`v2026.06.03-1`
+
+## File Changes In This Round
+
+- Updated: `scripts/nas-release.sh`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `YES=true ./scripts/nas-release.sh`
+- `git status --short`
+- `git log --oneline -1 --decorate`
+- `git tag --list 'v2026.06.03*'`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+- 现有服务状态未变更。
+
+## API/Interface Status
+
+- 无接口变更。
+
+## Validation Result
+
+- `backend` 构建通过。
+- `frontend` 构建通过。
+- 本地 smoke test 通过。
+- GitHub 分支推送成功。
+- GitHub tag 推送成功。
+
+## Notes / Blockers
+
+- 无新增阻塞。
+
+## Next Step
+
+- 如需继续，可执行云服务器侧 `deploy.sh v2026.06.03-1` 完成生产环境更新。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
 执行 `scripts/nas-release.sh` 完成仓库发布上传，并处理发布脚本的暂存排除逻辑。
 
 ## Project Current Status
