@@ -6,6 +6,49 @@
 
 ## Round Goal
 
+修正 `scripts/nas-release.sh` 的发布确认交互，允许小写 `yes` 继续发布。
+
+## Project Current Status
+
+- `scripts/nas-release.sh` 的交互确认现已支持 `YES/yes/Y/y`。
+- 仍保持本地发布流程与远端推送流程一致。
+
+## File Changes In This Round
+
+- Updated: `scripts/nas-release.sh`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '140,210p' scripts/nas-release.sh`
+- `sed -n '210,280p' scripts/nas-release.sh`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- 无接口变更。
+
+## Validation Result
+
+- 发布确认交互已修正为大小写兼容。
+
+## Notes / Blockers
+
+- 无新增阻塞。
+
+## Next Step
+
+- 重新执行 `scripts/nas-release.sh` 完成发布上传。
+
+## Date
+
+2026-06-03
+
+## Round Goal
+
 完成 `scripts/nas-release.sh` 发布上传，并确保仓库可成功推送到 GitHub 远端。
 
 ## Project Current Status

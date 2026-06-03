@@ -238,7 +238,13 @@ echo "发布 tag：$TAG_NAME"
 if [ "$YES" != "true" ]; then
   echo
   read -r -p "确认 commit、push master、创建并 push tag？输入 YES 继续：" CONFIRM
-  [ "$CONFIRM" = "YES" ] || fail "已取消发布。"
+  case "$CONFIRM" in
+    YES|yes|Y|y)
+      ;;
+    *)
+      fail "已取消发布。"
+      ;;
+  esac
 fi
 
 log "10. Commit"
