@@ -221,10 +221,11 @@ log "8. 暂存并检查敏感文件"
 stage_allowed_files
 check_forbidden_staged_files
 
-git diff --cached --stat
-
 if git diff --cached --quiet; then
-  fail "没有可提交的改动。"
+  echo "ℹ️ 没有新的可提交改动，将直接尝试推送当前 HEAD 与 tag。"
+  SKIP_COMMIT=1
+else
+  git diff --cached --stat
 fi
 
 log "9. 发布确认"
@@ -241,7 +242,11 @@ if [ "$YES" != "true" ]; then
 fi
 
 log "10. Commit"
-git commit -m "$COMMIT_MESSAGE"
+if [ "${SKIP_COMMIT:-0}" = "1" ]; then
+  echo "ℹ️ 跳过 commit，使用当前 HEAD：$(git rev-parse --short HEAD)"
+else
+  git commit -m "$COMMIT_MESSAGE"
+fi
 
 log "11. Push branch"
 git push origin "$BRANCH"
