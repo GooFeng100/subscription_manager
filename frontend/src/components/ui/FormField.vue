@@ -7,6 +7,8 @@
         <span v-else class="icon-fallback">{{ icon }}</span>
       </span>
       <input
+        :id="fieldId"
+        :name="fieldName"
         :type="inputType"
         :placeholder="placeholder"
         :value="modelValue"
@@ -33,6 +35,8 @@ const props = withDefaults(
   defineProps<{
     label: string;
     modelValue: string;
+    id?: string;
+    name?: string;
     type?: string;
     placeholder?: string;
     autocomplete?: string;
@@ -42,6 +46,8 @@ const props = withDefaults(
   }>(),
   {
     type: 'text',
+    id: '',
+    name: '',
     placeholder: '',
     autocomplete: 'off',
     hint: '',
@@ -49,6 +55,9 @@ const props = withDefaults(
     iconSrc: ''
   }
 );
+
+const fieldId = computed(() => props.id || 'field-' + props.label.replace(/\s+/g, '-').toLowerCase());
+const fieldName = computed(() => props.name || props.autocomplete || fieldId.value);
 
 const showPassword = ref(false);
 const inputType = computed(() => {

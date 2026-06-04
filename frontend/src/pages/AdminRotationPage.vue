@@ -36,11 +36,11 @@
       <div class="panel-body form-grid">
         <label>
           轮换原因
-          <input v-model="reason" placeholder="例如：上游失效切换" />
+          <input id="rotation-manual-reason" name="rotationManualReason" v-model="reason" placeholder="例如：上游失效切换" />
         </label>
         <label>
           确认口令
-          <input v-model="confirmText" :placeholder="`请输入 ${status?.confirm_text || 'ROTATE'}`" />
+          <input id="rotation-manual-confirm-text" name="rotationManualConfirmText" v-model="confirmText" :placeholder="`请输入 ${status?.confirm_text || 'ROTATE'}`" />
         </label>
       </div>
       <div class="panel-actions">
@@ -93,12 +93,13 @@
       <div class="panel-head logs-head">
         <h2>轮换日志</h2>
         <div class="filters">
-          <input v-model="qReason" placeholder="筛选原因" />
-          <select v-model="qResult">
+          <input id="rotation-log-reason" name="rotationLogReason" v-model="qReason" placeholder="筛选原因" @keyup.enter="loadLogsFirstPage" />
+          <select id="rotation-log-result" name="rotationLogResult" v-model="qResult">
             <option value="">全部结果</option>
             <option value="success">成功</option>
             <option value="failed">失败</option>
           </select>
+          <button id="rotation-log-submit" name="rotationLogSubmit" type="button" :disabled="loadingLogs" @click="loadLogsFirstPage">{{ loadingLogs ? '查询中...' : '查询' }}</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -114,7 +115,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="log in filteredLogs" :key="log.id">
+            <tr v-for="log in logs" :key="log.id">
               <td>{{ fmtDateTime(log.created_at) }}</td>
               <td class="mono">{{ log.from_version }} → {{ log.to_version === null ? 'FAILED' : log.to_version }}</td>
               <td>{{ log.reason || '-' }}</td>
@@ -122,11 +123,22 @@
               <td>{{ log.impacted_user_count }}</td>
               <td><span class="status" :class="log.success ? 'is-ok' : 'is-bad'">{{ log.success ? '成功' : '失败' }}</span></td>
             </tr>
-            <tr v-if="filteredLogs.length === 0" class="empty-row">
+            <tr v-if="loadingLogs" class="empty-row">
+              <td colspan="6">加载中...</td>
+            </tr>
+            <tr v-else-if="logs.length === 0" class="empty-row">
               <td colspan="6">暂无轮换日志</td>
             </tr>
           </tbody>
         </table>
+      </div>
+      <div class="logs-pagination">
+        <span>{{ logRangeText }}</span>
+        <div class="pager">
+          <button type="button" :disabled="loadingLogs || logPage <= 1" @click="goLogPage(logPage - 1)">上一页</button>
+          <strong>{{ logPage }} / {{ logTotalPages }}</strong>
+          <button type="button" :disabled="loadingLogs || logPage >= logTotalPages" @click="goLogPage(logPage + 1)">下一页</button>
+        </div>
       </div>
     </section>
 
@@ -137,28 +149,28 @@
           <button type="button" class="icon-close" @click="scheduleOpen = false">×</button>
         </div>
         <div class="modal-form">
-          <label>计划名称<input v-model="scheduleForm.name" placeholder="例如：每日凌晨轮换" /></label>
+          <label>计划名称<input id="rotation-schedule-name" name="rotationScheduleName" v-model="scheduleForm.name" placeholder="例如：每日凌晨轮换" /></label>
           <label>执行模式
-            <select v-model="scheduleForm.mode">
+            <select id="rotation-schedule-mode" name="rotationScheduleMode" v-model="scheduleForm.mode">
               <option value="once">指定某一日</option>
               <option value="monthly">每月第几日</option>
             </select>
           </label>
           <div class="schedule-grid">
             <label v-if="scheduleForm.mode === 'once'">指定日期
-              <input v-model="scheduleForm.onceDate" type="date" />
+              <input id="rotation-schedule-once-date" name="rotationScheduleOnceDate" v-model="scheduleForm.onceDate" type="date" />
             </label>
             <label v-if="scheduleForm.mode === 'monthly'">每月几号
-              <input v-model.number="scheduleForm.dayOfMonth" type="number" min="1" max="31" />
+              <input id="rotation-schedule-day-of-month" name="rotationScheduleDayOfMonth" v-model.number="scheduleForm.dayOfMonth" type="number" min="1" max="31" />
             </label>
             <label>小时
-              <input v-model.number="scheduleForm.hour" type="number" min="0" max="23" />
+              <input id="rotation-schedule-hour" name="rotationScheduleHour" v-model.number="scheduleForm.hour" type="number" min="0" max="23" />
             </label>
             <label>分钟
-              <input v-model.number="scheduleForm.minute" type="number" min="0" max="59" />
+              <input id="rotation-schedule-minute" name="rotationScheduleMinute" v-model.number="scheduleForm.minute" type="number" min="0" max="59" />
             </label>
           </div>
-          <label>备注<textarea v-model="scheduleForm.note" rows="3" placeholder="可选"></textarea></label>
+          <label>备注<textarea id="rotation-schedule-note" name="rotationScheduleNote" v-model="scheduleForm.note" rows="3" placeholder="可选"></textarea></label>
         </div>
         <div class="modal-actions modal-foot">
           <button type="button" @click="scheduleOpen = false">取消</button>
@@ -223,6 +235,7 @@ type RotationSchedule = {
 
 const status = ref<RotationStatus | null>(null);
 const logs = ref<RotationLog[]>([]);
+const loadingLogs = ref(false);
 const activeTab = ref<"manual" | "schedule">("manual");
 const reason = ref('manual rotate');
 const confirmText = ref('');
@@ -231,6 +244,8 @@ const msgType = ref<'ok' | 'bad' | ''>('');
 const error = ref('');
 const qReason = ref('');
 const qResult = ref('');
+const logPage = ref(1);
+const logTotal = ref(0);
 const scheduleOpen = ref(false);
 const scheduleDeleteOpen = ref(false);
 const scheduleDeleteTarget = ref<RotationSchedule | null>(null);
@@ -245,17 +260,57 @@ const scheduleForm = ref({
   note: ""
 });
 
-const filteredLogs = computed(() => logs.value.filter((log) => {
-  const okReason = qReason.value ? (log.reason || '').toLowerCase().includes(qReason.value.toLowerCase()) : true;
-  const okResult = qResult.value ? (qResult.value === 'success' ? log.success : !log.success) : true;
-  return okReason && okResult;
-}));
+const LOG_PAGE_SIZE = 10;
+const logTotalPages = computed(() => Math.max(1, Math.ceil(logTotal.value / LOG_PAGE_SIZE)));
+const logRangeText = computed(() => {
+  if (logTotal.value <= 0) return '第 0-0 条 / 共 0 条';
+  const start = (logPage.value - 1) * LOG_PAGE_SIZE + 1;
+  const end = Math.min(logPage.value * LOG_PAGE_SIZE, logTotal.value);
+  return `第 ${start}-${end} 条 / 共 ${logTotal.value} 条`;
+});
+
+function buildLogQuery() {
+  const query = new URLSearchParams({
+    page: String(logPage.value),
+    pageSize: String(LOG_PAGE_SIZE)
+  });
+  if (qReason.value.trim()) query.set('reason', qReason.value.trim());
+  if (qResult.value) query.set('result', qResult.value);
+  return query.toString();
+}
+
+async function loadRotationLogs() {
+  loadingLogs.value = true;
+  try {
+    const data = await api<{ items: RotationLog[]; total?: number; page?: number; pageSize?: number }>(`/api/admin/rotation/logs?${buildLogQuery()}`);
+    logs.value = data.items || [];
+    logTotal.value = Number(data.total || 0);
+    logPage.value = Number(data.page || logPage.value || 1);
+  } catch (e) {
+    error.value = `读取轮换日志失败：${(e as Error).message}`;
+    logs.value = [];
+    logTotal.value = 0;
+  } finally {
+    loadingLogs.value = false;
+  }
+}
+
+async function loadLogsFirstPage() {
+  logPage.value = 1;
+  await loadRotationLogs();
+}
+
+async function goLogPage(nextPage: number) {
+  const bounded = Math.min(Math.max(1, nextPage), logTotalPages.value);
+  if (bounded === logPage.value || loadingLogs.value) return;
+  logPage.value = bounded;
+  await loadRotationLogs();
+}
 
 async function refresh() {
   try {
     status.value = await api<RotationStatus>('/api/admin/rotation/status');
-    const data = await api<{ items: RotationLog[] }>('/api/admin/rotation/logs');
-    logs.value = data.items || [];
+    await loadRotationLogs();
     msg.value = '状态已刷新';
     msgType.value = 'ok';
   } catch (e) {
@@ -276,6 +331,7 @@ async function execute() {
     msg.value = data.message || '执行成功';
     msgType.value = 'ok';
     confirmText.value = '';
+    logPage.value = 1;
     await refresh();
   } catch (e) {
     msg.value = (e as Error).message;
@@ -416,8 +472,11 @@ h1 { margin: 0; color: #0f172a; }
 .panel-head .mini:hover { background: #1d4ed8; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
 
 .logs-head { align-items: flex-end; }
-.filters { display: grid; grid-template-columns: 1fr 140px; gap: 8px; }
-.filters input,.filters select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
+.filters { display: grid; grid-template-columns: 1fr 140px 90px; gap: 8px; }
+.filters input,.filters select,.filters button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
+.filters button { cursor: pointer; min-width: 88px; color: #1f2937; font-weight: 600; white-space: nowrap; }
+.filters button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.filters button:disabled { cursor: not-allowed; opacity: 0.65; box-shadow: none; }
 
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; min-width: 980px; border-collapse: collapse; }
@@ -429,6 +488,11 @@ th { color: #64748b; font-weight: 600; background: #f8fafc; }
 .status.is-ok { background: #ecfdf3; color: #15803d; }
 .status.is-bad { background: #fef2f2; color: #b91c1c; }
 .status.is-disabled { background: #e5e7eb; color: #374151; }
+.logs-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid #e2e8f0; background: #f8fafc; color: #475569; font-size: 13px; }
+.pager { display: inline-flex; align-items: center; gap: 10px; }
+.pager strong { color: #0f172a; min-width: 64px; text-align: center; }
+.pager button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-weight: 600; }
+.pager button:disabled { cursor: not-allowed; opacity: 0.55; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actions button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 4px 8px; font-size: 12px; line-height: 1.2; min-width: 52px; cursor: pointer; }
 .actions button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
@@ -460,6 +524,8 @@ th { color: #64748b; font-weight: 600; background: #f8fafc; }
   .status-cards { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .filters { grid-template-columns: 1fr; width: 100%; }
+  .logs-pagination { align-items: stretch; flex-direction: column; }
+  .pager { justify-content: space-between; }
   .schedule-grid { grid-template-columns: 1fr; }
   .logs-head { align-items: stretch; }
 }

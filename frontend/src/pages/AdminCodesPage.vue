@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AdminLayout>
     <div class="head">
       <div>
@@ -10,8 +10,8 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="filters">
-      <input v-model="qCode" placeholder="筛选授权码" />
-      <input v-model="qUser" placeholder="筛选使用用户" />
+      <input id="admin-codes-filter-code" name="adminCodesFilterCode" v-model="qCode" placeholder="筛选授权码" />
+      <input id="admin-codes-filter-user" name="adminCodesFilterUser" v-model="qUser" placeholder="筛选使用用户" />
       <button type="button" class="add-btn" @click="openCreate">生成授权码</button>
     </div>
 
@@ -20,7 +20,7 @@
         <thead>
           <tr>
             <th>授权码</th>
-            <th>授权天数</th>
+            <th>有效期规则</th>
             <th>创建日期</th>
             <th>使用日期</th>
             <th>使用用户</th>
@@ -34,14 +34,15 @@
             <td>
               <button class="copy-code" type="button" @click="copyCode(c.code)">{{ c.code }}</button>
             </td>
-            <td>{{ c.days }}</td>
+            <td>{{ c.displayExpireRule }}</td>
             <td>{{ fmtDay(c.created_at) }}</td>
             <td>{{ fmtDay(c.used_at) }}</td>
             <td>{{ c.used_by_username || '-' }}</td>
-            <td><span class="status" :class="statusClass(c.status)">{{ statusLabel(c.status) }}</span></td>
+            <td><span class="status" :class="statusClass(c.status)">{{ statusLabel(c) }}</span></td>
             <td>{{ c.note || '-' }}</td>
             <td>
               <div class="actions">
+                <button type="button" class="edit" :disabled="c.status !== 'unused'" @click="openEdit(c)">修改</button>
                 <button type="button" class="warn" :disabled="c.status === 'used' || c.status === 'revoked'" @click="openRevoke(c)">作废</button>
                 <button type="button" class="danger" :disabled="c.status === 'used'" @click="openDelete(c)">删除</button>
               </div>
@@ -62,21 +63,63 @@
           <button type="button" class="icon-close" @click="createOpen = false">×</button>
         </div>
         <div class="modal-form">
-          <label>生成数量<input v-model.number="createCount" type="number" min="1" max="100" placeholder="请输入生成数量，例如 10" /></label>
-          <label>授权天数</label>
-          <div class="day-quick">
-            <button type="button" :class="{ active: createDays === 30 }" @click="setDays(30)">30天</button>
-            <button type="button" :class="{ active: createDays === 90 }" @click="setDays(90)">90天</button>
-            <button type="button" :class="{ active: createDays === 180 }" @click="setDays(180)">180天</button>
-            <button type="button" :class="{ active: createDays === 365 }" @click="setDays(365)">365天</button>
-            <button type="button" :class="{ active: customDays }" @click="customDays = true">自定义</button>
-          </div>
-          <input v-if="customDays" v-model.number="createDays" type="number" min="1" max="3650" placeholder="请输入自定义天数" />
-          <label>备注<textarea v-model="createNote" rows="3" placeholder="可选，用于记录本次生成用途"></textarea></label>
+          <label>生成数量<input id="admin-codes-create-count" name="adminCodesCreateCount" v-model.number="createCount" type="number" min="1" max="100" placeholder="请输入生成数量，例如 10" /></label>
+          <fieldset class="mode-fieldset">
+            <legend>激活模式</legend>
+            <label class="radio-line"><input id="admin-codes-create-mode-add-days" name="adminCodesCreateMode" v-model="createMode" type="radio" value="add_days" />增加有效期天数</label>
+            <label class="radio-line"><input id="admin-codes-create-mode-fixed-date" name="adminCodesCreateMode" v-model="createMode" type="radio" value="fixed_expire_date" />设置到固定日期</label>
+          </fieldset>
+          <template v-if="createMode === 'add_days'">
+            <p class="form-hint">从账号当前到期日累加；若账号已过期或未激活，则从今天起算。</p>
+            <label>授权天数</label>
+            <div class="day-quick">
+              <button type="button" :class="{ active: createDays === 30 }" @click="setDays(30)">30天</button>
+              <button type="button" :class="{ active: createDays === 90 }" @click="setDays(90)">90天</button>
+              <button type="button" :class="{ active: createDays === 180 }" @click="setDays(180)">180天</button>
+              <button type="button" :class="{ active: createDays === 365 }" @click="setDays(365)">365天</button>
+              <button type="button" :class="{ active: customDays }" @click="customDays = true">自定义</button>
+            </div>
+            <input v-if="customDays" id="admin-codes-create-days" name="adminCodesCreateDays" v-model.number="createDays" type="number" min="1" max="3650" placeholder="请输入自定义天数" />
+          </template>
+          <template v-else>
+            <p class="form-hint">固定日期会直接设置账号到期日，不是累加；到期日当天 23:59:59（北京时间）前仍有效。</p>
+            <label>固定到期日<input id="admin-codes-create-fixed-expire-date" name="adminCodesCreateFixedExpireDate" v-model="createFixedExpireDate" type="date" /></label>
+          </template>
+          <label>备注<textarea id="admin-codes-create-note" name="adminCodesCreateNote" v-model="createNote" rows="3" placeholder="可选，用于记录本次生成用途"></textarea></label>
         </div>
         <div class="modal-actions modal-foot">
           <button type="button" @click="createOpen = false">取消</button>
           <button type="button" class="add-btn" @click="submitCreate">确认生成</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="editOpen" class="modal-mask">
+      <div class="modal create-modal">
+        <div class="modal-head">
+          <h3>修改授权码</h3>
+          <button type="button" class="icon-close" @click="editOpen = false">×</button>
+        </div>
+        <div class="modal-form">
+          <p class="form-hint">仅未使用授权码可修改。当前授权码：{{ selectedCode?.code }}</p>
+          <fieldset class="mode-fieldset">
+            <legend>激活模式</legend>
+            <label class="radio-line"><input id="admin-codes-edit-mode-add-days" name="adminCodesEditMode" v-model="editMode" type="radio" value="add_days" />增加有效期天数</label>
+            <label class="radio-line"><input id="admin-codes-edit-mode-fixed-date" name="adminCodesEditMode" v-model="editMode" type="radio" value="fixed_expire_date" />设置到固定日期</label>
+          </fieldset>
+          <template v-if="editMode === 'add_days'">
+            <p class="form-hint">从账号当前到期日累加；若账号已过期或未激活，则从今天起算。</p>
+            <label>授权天数<input id="admin-codes-edit-days" name="adminCodesEditDays" v-model.number="editDays" type="number" min="1" max="3650" placeholder="请输入天数" /></label>
+          </template>
+          <template v-else>
+            <p class="form-hint">固定日期会直接设置账号到期日，不是累加；允许比用户当前到期日更早。</p>
+            <label>固定到期日<input id="admin-codes-edit-fixed-expire-date" name="adminCodesEditFixedExpireDate" v-model="editFixedExpireDate" type="date" /></label>
+          </template>
+          <label>备注<textarea id="admin-codes-edit-note" name="adminCodesEditNote" v-model="editNote" rows="3" placeholder="可选，用于记录用途"></textarea></label>
+        </div>
+        <div class="modal-actions modal-foot">
+          <button type="button" @click="editOpen = false">取消</button>
+          <button type="button" class="add-btn" @click="submitEdit">保存修改</button>
         </div>
       </div>
     </div>
@@ -86,7 +129,7 @@
         <div class="modal-content">
           <h3>生成成功</h3>
           <p class="sub">共生成 {{ createdCodes.length }} 个授权码</p>
-          <textarea readonly :value="createdCodes.join('\n')" rows="8"></textarea>
+          <textarea id="admin-codes-created-result" name="adminCodesCreatedResult" readonly :value="createdCodes.join('\n')" rows="8"></textarea>
         </div>
         <div class="modal-actions">
           <button type="button" @click="successOpen = false">关闭</button>
@@ -113,13 +156,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
-import { api } from '../lib/api';
+import { api, fmtDateOnly } from '../lib/api';
+
+type CodeMode = 'add_days' | 'fixed_expire_date';
 
 type Item = {
   id: string;
   code: string;
+  mode: CodeMode;
   days: number;
+  fixedExpireDate: string | null;
+  displayExpireRule: string;
   status: 'unused' | 'used' | 'revoked' | string;
+  revokeReason?: string | null;
   used_by_username: string | null;
   used_at: string | null;
   created_at: string;
@@ -128,8 +177,14 @@ type Item = {
 type ApiCodeItem = {
   id: string;
   code: string;
+  mode?: CodeMode;
+  days?: number;
   duration_days: number;
+  fixedExpireDate?: string | null;
+  fixed_expire_date?: string | null;
+  displayExpireRule?: string;
   status: 'unused' | 'used' | 'revoked' | string;
+  revokeReason?: string | null;
   used_by_username: string | null;
   used_at: string | null;
   created_at: string;
@@ -138,6 +193,7 @@ type ApiCodeItem = {
 type CreateCodeResponse = {
   items: Array<{
     code: string;
+    mode?: CodeMode;
     duration_days: number;
     grace_days: number;
     status: string;
@@ -152,22 +208,41 @@ const qUser = ref('');
 
 const createOpen = ref(false);
 const createCount = ref(5);
+const createMode = ref<CodeMode>('add_days');
 const createDays = ref(30);
+const createFixedExpireDate = ref('');
 const customDays = ref(false);
 const createNote = ref('');
 const successOpen = ref(false);
 const createdCodes = ref<string[]>([]);
 
+const editOpen = ref(false);
+const editMode = ref<CodeMode>('add_days');
+const editDays = ref(30);
+const editFixedExpireDate = ref('');
+const editNote = ref('');
+
 const confirmOpen = ref(false);
 const confirmMode = ref<'revoke' | 'delete'>('revoke');
 const selectedCode = ref<Item | null>(null);
 
+function buildDisplayRule(mode: CodeMode, days: number, fixedExpireDate: string | null) {
+  return mode === 'fixed_expire_date' ? `固定到期 ${fixedExpireDate || '-'}` : `增加 ${days} 天`;
+}
+
 function normalizeCodeItem(i: ApiCodeItem): Item {
+  const mode = i.mode === 'fixed_expire_date' ? 'fixed_expire_date' : 'add_days';
+  const days = Number(i.days ?? i.duration_days ?? 0);
+  const fixedExpireDate = i.fixedExpireDate ?? i.fixed_expire_date ?? null;
   return {
     id: i.id,
     code: i.code,
-    days: i.duration_days,
+    mode,
+    days,
+    fixedExpireDate,
+    displayExpireRule: i.displayExpireRule || buildDisplayRule(mode, days, fixedExpireDate),
     status: i.status,
+    revokeReason: i.revokeReason ?? null,
     used_by_username: i.used_by_username,
     used_at: i.used_at,
     created_at: i.created_at,
@@ -182,11 +257,7 @@ const filteredItems = computed(() => items.value.filter((c) => {
 }));
 
 function fmtDay(value: string | null | undefined) {
-  if (!value) return '-';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return fmtDateOnly(value);
 }
 
 function statusClass(status: string) {
@@ -196,11 +267,17 @@ function statusClass(status: string) {
   return 'is-used';
 }
 
-function statusLabel(status: string) {
+function statusLabel(item: Item) {
+  const status = item.status;
   if (status === 'unused') return '未使用';
   if (status === 'used') return '已使用';
-  if (status === 'revoked') return '已作废';
+  if (status === 'revoked') return item.revokeReason === 'expired_fixed_date' ? '自动作废' : '已作废';
   return status;
+}
+
+async function reloadCodes() {
+  const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
+  items.value = (latest.items || []).map(normalizeCodeItem);
 }
 
 async function copyCode(code: string) {
@@ -210,12 +287,20 @@ async function copyCode(code: string) {
 
 function openCreate() {
   customDays.value = false;
+  createMode.value = 'add_days';
   createOpen.value = true;
 }
 
 function setDays(days: number) {
   createDays.value = days;
   customDays.value = false;
+}
+
+function buildRulePayload(mode: CodeMode, days: number, fixedExpireDate: string) {
+  if (mode === 'fixed_expire_date') {
+    return { mode, fixedExpireDate };
+  }
+  return { mode, durationDays: days, days };
 }
 
 async function submitCreate() {
@@ -226,10 +311,9 @@ async function submitCreate() {
   try {
     const created = await api<CreateCodeResponse>('/api/admin/codes', {
       method: 'POST',
-      body: JSON.stringify({ count, durationDays: days, graceDays: 3, note })
+      body: JSON.stringify({ count, ...buildRulePayload(createMode.value, days, createFixedExpireDate.value), graceDays: 3, note })
     });
-    const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
-    items.value = (latest.items || []).map(normalizeCodeItem);
+    await reloadCodes();
     createdCodes.value = (created.items || []).map((i) => i.code);
   } catch (e) {
     error.value = `生成失败：${(e as Error).message}`;
@@ -239,6 +323,34 @@ async function submitCreate() {
   createOpen.value = false;
   createNote.value = '';
   successOpen.value = true;
+}
+
+function openEdit(c: Item) {
+  if (c.status !== 'unused') return;
+  selectedCode.value = c;
+  editMode.value = c.mode;
+  editDays.value = c.days || 30;
+  editFixedExpireDate.value = c.fixedExpireDate || '';
+  editNote.value = c.note || '';
+  editOpen.value = true;
+}
+
+async function submitEdit() {
+  const target = selectedCode.value;
+  if (!target) return;
+  const days = Math.max(1, Math.min(3650, Number(editDays.value) || 30));
+  try {
+    await api(`/api/admin/codes/${target.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ ...buildRulePayload(editMode.value, days, editFixedExpireDate.value), note: editNote.value.trim() })
+    });
+    await reloadCodes();
+    copyMsg.value = `已修改授权码：${target.code}`;
+    editOpen.value = false;
+    selectedCode.value = null;
+  } catch (e) {
+    error.value = `修改失败：${(e as Error).message}`;
+  }
 }
 
 async function copyAllCreated() {
@@ -305,8 +417,7 @@ async function submitConfirm() {
     } else {
       await api(`/api/admin/codes/${target.id}`, { method: 'DELETE' });
     }
-    const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
-    items.value = (latest.items || []).map(normalizeCodeItem);
+    await reloadCodes();
   } catch (e) {
     error.value = `操作失败：${(e as Error).message}`;
   }
@@ -317,8 +428,7 @@ async function submitConfirm() {
 
 onMounted(async () => {
   try {
-    const data = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
-    items.value = (data.items || []).map(normalizeCodeItem);
+    await reloadCodes();
   } catch (e) {
     error.value = `接口读取失败：${(e as Error).message}`;
     items.value = [];
@@ -339,7 +449,7 @@ h1 { margin: 0; color: #0f172a; }
 .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff; font-weight: 600; }
 
 .table-wrap { overflow-x: auto; }
-.table { width: 100%; min-width: 1080px; border-collapse: collapse; }
+.table { width: 100%; min-width: 1120px; border-collapse: collapse; }
 th, td { border-bottom: 1px solid #e2e8f0; text-align: left; padding: 10px 8px; font-size: 14px; vertical-align: middle; }
 th { color: #64748b; font-weight: 600; background: #f8fafc; }
 .empty-row td { text-align: center; color: #94a3b8; padding: 22px 8px; }
@@ -364,13 +474,14 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .actions button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 6px; padding: 4px 10px; font-size: 12px; line-height: 1.2; min-width: 56px; cursor: pointer; transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease; }
 .actions button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.actions .edit { border-color: #bfdbfe; color: #1d4ed8; background: #eff6ff; }
 .actions .warn { border-color: #fcd34d; color: #92400e; background: #fffbeb; }
 .actions .danger { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
 .actions button:disabled { border-color: #e5e7eb; background: #f3f4f6; color: #9ca3af; cursor: not-allowed; box-shadow: none; }
 .actions button:disabled:hover { border-color: #e5e7eb; background: #f3f4f6; color: #9ca3af; box-shadow: none; }
 
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 60; }
-.modal { width: 58%; max-width: 500px; min-width: 320px; background: #fff; border: 1px solid #dbe3ef; border-radius: 12px; padding: 0; overflow: hidden; }
+.modal { width: 58%; max-width: 540px; min-width: 320px; background: #fff; border: 1px solid #dbe3ef; border-radius: 12px; padding: 0; overflow: hidden; }
 .modal h3 { margin: 0; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f5f7ff; }
 .icon-close { border: 0 !important; background: transparent !important; color: #475569 !important; font-size: 28px; font-weight: 400; line-height: 1; cursor: pointer; padding: 0 4px !important; min-width: auto !important; min-height: auto !important; }
@@ -378,10 +489,15 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .modal-form label { display: grid; gap: 6px; font-size: 13px; color: #334155; }
 .modal-form input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
 .modal-form textarea { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.mode-fieldset { border: 1px solid #dbe3ef; border-radius: 10px; display: grid; gap: 8px; margin: 0; padding: 10px 12px; }
+.mode-fieldset legend { color: #334155; font-size: 13px; font-weight: 700; padding: 0 4px; }
+.radio-line { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 8px !important; }
+.radio-line input { width: auto; padding: 0; }
+.form-hint { margin: 0; color: #64748b; font-size: 12px; line-height: 1.5; }
 .day-quick { display: flex; flex-wrap: wrap; gap: 8px; }
 .day-quick button { border: 1px solid #d4d9e4; background: #f8fafc; color: #334155; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
 .day-quick button.active { border-color: #2563eb; background: #2563eb; color: #fff; }
- .day-quick button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
+.day-quick button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
 .modal textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
 .modal-actions { box-sizing: border-box; margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; padding: 0 16px 14px; }
 .modal-foot { margin-top: 0; border-top: 1px solid #e2e8f0; padding: 12px 16px; background: #f8faff; }

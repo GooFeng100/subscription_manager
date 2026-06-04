@@ -13,6 +13,7 @@ import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
 import { getRuntimeSettings } from "./lib/runtime-settings.js";
 import { startUpstreamAutoPolling } from "./services/upstream-poller.js";
+import { startActivationCodeExpiryJob } from "./services/activation-code-expiry.js";
 
 async function bootstrap() {
   await connectDb();
@@ -92,6 +93,7 @@ async function bootstrap() {
   });
 
   startUpstreamAutoPolling();
+  startActivationCodeExpiryJob();
 }
 
 bootstrap().catch((error) => {

@@ -2,20 +2,11 @@
 set -Eeuo pipefail
 
 APP_DIR="/vol1/1000/docker/subscription_manager"
-BRANCH="${BRANCH:-master}"   # GitHub 默认分支为 master
-COMMIT_MESSAGE="${1:-release: update subscription_manager}"
-TAG_NAME="${2:-}"
-YES="${YES:-false}"
-
-BASE_URL="${BASE_URL:-http://127.0.0.1:8084}"
-COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
-
-# 可选：如需顺带测试订阅格式，可在执行前设置这些环境变量
-# ACTIVE_TOKEN="xxx" EXPIRED_TOKEN="xxx" INACTIVE_TOKEN="xxx" DISABLED_TOKEN="xxx" scripts/nas-release.sh "commit message"
-ACTIVE_TOKEN="${ACTIVE_TOKEN:-}"
-EXPIRED_TOKEN="${EXPIRED_TOKEN:-}"
-INACTIVE_TOKEN="${INACTIVE_TOKEN:-}"
-DISABLED_TOKEN="${DISABLED_TOKEN:-}"
+COMPOSE_FILE="$APP_DIR/compose.yaml"
+FRONTEND_DIR="$APP_DIR/frontend"
+BACKEND_DIR="$APP_DIR/backend"
+FRONTEND_DIST="$FRONTEND_DIR/dist"
+APP_URL="http://127.0.0.1:8084"
 
 log() {
   echo
@@ -25,246 +16,145 @@ log() {
 }
 
 fail() {
-  echo "❌ $1" >&2
+  echo
+  echo "❌ 发布失败：$1"
+  echo
+  echo "---- app logs ----"
+  docker compose -f "$COMPOSE_FILE" logs --tail=120 app || true
+  echo
+  echo "---- caddy logs ----"
+  docker compose -f "$COMPOSE_FILE" logs --tail=120 caddy || true
   exit 1
 }
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || fail "缺少命令：$1"
-}
+wait_url() {
+  local name="$1"
+  local url="$2"
+  local max_attempts="${3:-36}"
+  local sleep_seconds="${4:-5}"
 
-make_tag() {
-  local base
-  base="v$(date +%Y.%m.%d)"
+  echo "等待 $name：$url"
 
-  if ! git rev-parse "refs/tags/$base" >/dev/null 2>&1; then
-    echo "$base"
-    return
-  fi
+  for i in $(seq 1 "$max_attempts"); do
+    if curl -fsS "$url" >/dev/null; then
+      echo "✅ $name 正常"
+      return 0
+    fi
 
-  local i=1
-  while git rev-parse "refs/tags/$base-$i" >/dev/null 2>&1; do
-    i=$((i + 1))
+    echo "[$i/$max_attempts] $name 暂未就绪，${sleep_seconds}s 后重试..."
+    sleep "$sleep_seconds"
   done
-  echo "$base-$i"
+
+  fail "$name 检查失败：$url"
 }
 
-check_forbidden_tracked_files() {
-  local forbidden_regex='(^|/)(\.env|\.env\.prod|.*\.local|docker-compose\.prod\.yml|deploy\.sh|backup-mongo\.sh|restore-mongo\.sh)$|(^|/)(backups|mongodb-data|redis-data|caddy-data|caddy-config|node_modules|dist)/'
+install_deps() {
+  local dir="$1"
+  local name="$2"
 
-  local tracked
-  tracked="$(git ls-files | grep -E "$forbidden_regex" || true)"
-  if [ -n "$tracked" ]; then
-    echo "$tracked"
-    fail "发现敏感文件或运行目录已被 Git 跟踪，请先从 Git 中移除。"
+  log "安装/同步 ${name} 依赖"
+
+  cd "$dir"
+
+  if [ -f package-lock.json ]; then
+    npm ci
+  else
+    npm install
   fi
 }
 
-check_forbidden_staged_files() {
-  local forbidden_regex='(^|/)(\.env|\.env\.prod|.*\.local|docker-compose\.prod\.yml|deploy\.sh|backup-mongo\.sh|restore-mongo\.sh)$|(^|/)(backups|mongodb-data|redis-data|caddy-data|caddy-config|node_modules|dist)/'
+build_backend() {
+  log "构建后端"
+  cd "$BACKEND_DIR"
+  npm run build
+}
 
-  local staged
-  staged="$(git diff --cached --name-only | grep -E "$forbidden_regex" || true)"
-  if [ -n "$staged" ]; then
-    echo "$staged"
-    git reset
-    fail "暂存区包含禁止提交的敏感文件或运行目录，已取消暂存。"
+build_frontend() {
+  log "构建前端"
+  cd "$FRONTEND_DIR"
+  rm -rf "$FRONTEND_DIST"
+  npm run build
+
+  if [ ! -d "$FRONTEND_DIST" ]; then
+    fail "前端 dist 目录不存在：$FRONTEND_DIST"
   fi
 }
 
-stage_allowed_files() {
-  local path
-  local -a paths=()
+fix_dist_permissions() {
+  log "修复前端 dist 权限"
 
-  while IFS= read -r -d '' path; do
-    case "$path" in
-      .env|.env.prod|*.local|docker-compose.prod.yml|deploy.sh|backup-mongo.sh|restore-mongo.sh|caddy/Caddyfile|caddy/Caddyfile.prod)
-        continue
-        ;;
-      backups/*|mongodb-data/*|redis-data/*|caddy-data/*|caddy-config/*|node_modules/*|dist/*)
-        continue
-        ;;
-    esac
-    paths+=("$path")
-  done < <(git ls-files -m -o -d --exclude-standard -z)
+  find "$FRONTEND_DIST" -type d -exec chmod 755 {} \;
+  find "$FRONTEND_DIST" -type f -exec chmod 644 {} \;
 
-  [ "${#paths[@]}" -eq 0 ] && return 0
-
-  git add -- "${paths[@]}"
+  echo "dist 权限已修复：$FRONTEND_DIST"
+  ls -la "$FRONTEND_DIST" | head
 }
 
-curl_expect_2xx() {
-  local url="$1"
-  local code
-  code="$(curl -sS -o /tmp/nas-release-curl.out -w '%{http_code}' "$url" || true)"
-  if [[ ! "$code" =~ ^2 ]]; then
-    echo "--- response preview ---"
-    head -c 500 /tmp/nas-release-curl.out || true
-    echo
-    fail "请求失败：$url，HTTP $code"
-  fi
-  echo "✅ $url -> HTTP $code"
+rebuild_containers() {
+  log "重建并启动 app / caddy"
+
+  cd "$APP_DIR"
+
+  docker compose -f "$COMPOSE_FILE" config >/dev/null
+
+  # 只重建业务相关容器，不动数据库 volume，不清理系统。
+  docker compose -f "$COMPOSE_FILE" up -d --build app caddy
+
+  log "容器状态"
+  docker compose -f "$COMPOSE_FILE" ps
 }
 
-curl_expect_401() {
-  local url="$1"
-  local code
-  code="$(curl -sS -o /tmp/nas-release-curl.out -w '%{http_code}' "$url" || true)"
-  if [ "$code" != "401" ]; then
-    echo "--- response preview ---"
-    head -c 500 /tmp/nas-release-curl.out || true
-    echo
-    fail "未登录接口预期 401，但得到 HTTP $code：$url"
-  fi
-  echo "✅ $url -> HTTP 401"
-}
+smoke_test() {
+  log "等待服务就绪"
 
-subscription_test() {
-  local token="$1"
-  local target="$2"
-  local label="$3"
+  wait_url "首页" "$APP_URL/" 36 5
+  wait_url "健康检查" "$APP_URL/health" 36 5
+  wait_url "前端配置" "$APP_URL/config" 36 5
 
-  [ -z "$token" ] && return 0
-
-  local out="/tmp/submgr-${label}-${target}.out"
-  local headers="/tmp/submgr-${label}-${target}.headers"
-  local code
-
-  code="$(curl -sS -D "$headers" -o "$out" -w '%{http_code}' "$BASE_URL/sub/$token?target=$target" || true)"
-  if [ "$code" != "200" ]; then
-    echo "--- headers ---"
-    cat "$headers" || true
-    echo "--- body preview ---"
-    head -c 500 "$out" || true
-    echo
-    fail "订阅测试失败：$label target=$target HTTP $code"
-  fi
-
-  if grep -Eqi '<html|DOCTYPE html' "$out"; then
-    fail "订阅测试失败：$label target=$target 返回 HTML，疑似错误页"
-  fi
-
-  echo "✅ 订阅测试通过：$label target=$target HTTP 200"
-}
-
-log "0. 基础命令检查"
-require_cmd git
-require_cmd npm
-require_cmd docker
-require_cmd curl
-
-log "1. 进入项目目录"
-cd "$APP_DIR"
-pwd
-[ -d .git ] || fail "当前目录不是 Git 仓库：$APP_DIR"
-
-log "2. Git 分支和状态检查"
-git status --short
-git branch --show-current
-git log --oneline -5
-
-CURRENT_BRANCH="$(git branch --show-current || true)"
-if [ "$CURRENT_BRANCH" != "$BRANCH" ]; then
-  fail "当前分支是 $CURRENT_BRANCH，不是预期分支 $BRANCH。请先切换到 $BRANCH。"
-fi
-
-check_forbidden_tracked_files
-
-log "3. Backend build"
-npm run build --prefix backend
-
-echo "✅ backend build 通过"
-
-log "4. Frontend build"
-npm run build --prefix frontend
-
-echo "✅ frontend build 通过"
-
-log "5. Docker Compose 状态检查"
-docker compose -f "$COMPOSE_FILE" ps
-
-log "6. 本地 smoke test"
-curl_expect_2xx "$BASE_URL/"
-curl_expect_2xx "$BASE_URL/health"
-curl_expect_2xx "$BASE_URL/config"
-curl_expect_401 "$BASE_URL/api/auth/me"
-
-log "7. 可选订阅格式测试"
-if [ -n "$ACTIVE_TOKEN" ]; then
-  subscription_test "$ACTIVE_TOKEN" "clash" "active"
-  subscription_test "$ACTIVE_TOKEN" "mihomo" "active"
-  subscription_test "$ACTIVE_TOKEN" "sing-box" "active"
-  subscription_test "$ACTIVE_TOKEN" "shadowrocket" "active"
-else
-  echo "ℹ️ 未设置 ACTIVE_TOKEN，跳过 active 订阅格式测试。"
-fi
-
-if [ -n "$EXPIRED_TOKEN" ]; then
-  subscription_test "$EXPIRED_TOKEN" "clash" "expired"
-else
-  echo "ℹ️ 未设置 EXPIRED_TOKEN，跳过 expired 空订阅测试。"
-fi
-
-if [ -n "$INACTIVE_TOKEN" ]; then
-  subscription_test "$INACTIVE_TOKEN" "clash" "inactive"
-else
-  echo "ℹ️ 未设置 INACTIVE_TOKEN，跳过 inactive 空订阅测试。"
-fi
-
-if [ -n "$DISABLED_TOKEN" ]; then
-  subscription_test "$DISABLED_TOKEN" "clash" "disabled"
-else
-  echo "ℹ️ 未设置 DISABLED_TOKEN，跳过 disabled 空订阅测试。"
-fi
-
-log "8. 暂存并检查敏感文件"
-stage_allowed_files
-check_forbidden_staged_files
-
-if git diff --cached --quiet; then
-  echo "ℹ️ 没有新的可提交改动，将直接尝试推送当前 HEAD 与 tag。"
-  SKIP_COMMIT=1
-else
-  git diff --cached --stat
-fi
-
-log "9. 发布确认"
-echo "提交信息：$COMMIT_MESSAGE"
-if [ -z "$TAG_NAME" ]; then
-  TAG_NAME="$(make_tag)"
-fi
-echo "发布 tag：$TAG_NAME"
-
-if [ "$YES" != "true" ]; then
+  log "接口检查结果"
+  curl -i "$APP_URL/health"
   echo
-  read -r -p "确认 commit、push master、创建并 push tag？输入 YES 继续：" CONFIRM
-  case "$CONFIRM" in
-    YES|yes|Y|y)
-      ;;
-    *)
-      fail "已取消发布。"
-      ;;
-  esac
-fi
+  curl -i "$APP_URL/config"
+  echo
+}
 
-log "10. Commit"
-if [ "${SKIP_COMMIT:-0}" = "1" ]; then
-  echo "ℹ️ 跳过 commit，使用当前 HEAD：$(git rev-parse --short HEAD)"
-else
-  git commit -m "$COMMIT_MESSAGE"
-fi
+main() {
+  log "开始 NAS 本地发布"
+  echo "项目目录：$APP_DIR"
+  echo "Compose 文件：$COMPOSE_FILE"
+  echo "访问地址：$APP_URL"
 
-log "11. Push branch"
-git push origin "$BRANCH"
+  if [ ! -d "$APP_DIR" ]; then
+    echo "❌ 项目目录不存在：$APP_DIR"
+    exit 1
+  fi
 
-log "12. Create annotated tag"
-git tag -a "$TAG_NAME" -m "subscription_manager release $TAG_NAME"
+  if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "❌ compose 文件不存在：$COMPOSE_FILE"
+    exit 1
+  fi
 
-log "13. Push tag"
-git push origin "$TAG_NAME"
+  if [ ! -d "$BACKEND_DIR" ]; then
+    echo "❌ 后端目录不存在：$BACKEND_DIR"
+    exit 1
+  fi
 
-log "14. 完成"
-echo "✅ 本地 NAS 发布完成"
-echo "✅ 分支：$BRANCH"
-echo "✅ Tag：$TAG_NAME"
-echo "✅ 下一步：云服务器执行 /opt/apps/subscription-manager/deploy.sh $TAG_NAME"
+  if [ ! -d "$FRONTEND_DIR" ]; then
+    echo "❌ 前端目录不存在：$FRONTEND_DIR"
+    exit 1
+  fi
+
+  install_deps "$BACKEND_DIR" "backend"
+  install_deps "$FRONTEND_DIR" "frontend"
+
+  build_backend
+  build_frontend
+  fix_dist_permissions
+  rebuild_containers
+  smoke_test
+
+  log "✅ NAS 本地发布完成"
+  echo "入口：$APP_URL"
+}
+
+main "$@"

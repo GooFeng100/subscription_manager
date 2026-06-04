@@ -6,8 +6,8 @@
     <p>启用上游数：{{ status?.enabled_upstream_count ?? "-" }}</p>
 
     <div class="form">
-      <input v-model="reason" placeholder="轮换原因" />
-      <input v-model="confirmText" :placeholder="`输入 ${status?.confirm_text || 'ROTATE'} 确认`" />
+      <input id="user-rotation-reason" name="userRotationReason" v-model="reason" placeholder="轮换原因" />
+      <input id="user-rotation-confirm-text" name="userRotationConfirmText" v-model="confirmText" :placeholder="`输入 ${status?.confirm_text || 'ROTATE'} 确认`" />
       <button @click="execute">执行轮换</button>
       <button class="ghost" @click="refresh">刷新状态</button>
       <p class="msg">{{ msg }}</p>

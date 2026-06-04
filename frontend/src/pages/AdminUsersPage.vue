@@ -10,9 +10,9 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="filters">
-      <input v-model="qUsername" placeholder="筛选用户名" />
-      <input v-model="qContact" placeholder="筛选联系方式" />
-      <select v-model="qStatus">
+      <input id="admin-users-filter-username" name="adminUsersFilterUsername" v-model="qUsername" placeholder="筛选用户名" />
+      <input id="admin-users-filter-contact" name="adminUsersFilterContact" v-model="qContact" placeholder="筛选联系方式" />
+      <select id="admin-users-filter-status" name="adminUsersFilterStatus" v-model="qStatus">
         <option value="">全部状态</option>
         <option value="inactive">inactive</option>
         <option value="active">active</option>
@@ -118,8 +118,11 @@
             <span>密码</span>
             <div class="password-row edit-input-shell" :class="{ 'is-error-wrap': !!editFieldError.password }">
               <input
+                id="admin-user-edit-password"
+                name="adminUserEditPassword"
                 v-model="editForm.password"
                 :type="showEditPassword ? 'text' : 'password'"
+                autocomplete="new-password"
                 placeholder="留空则不修改密码"
                 :class="{ 'is-error': !!editFieldError.password }"
                 @focus="clearEditFieldError('password')"
@@ -128,8 +131,8 @@
             </div>
             <span v-if="editFieldError.password" class="field-error-bubble">{{ editFieldError.password }}</span>
           </label>
-          <label class="field"><span>联系方式</span><input class="edit-input" v-model="editForm.contact" placeholder="邮箱或手机号（可选）" /></label>
-          <label class="field"><span>到期时间</span><input class="edit-input" v-model="editForm.expire_at" type="date" /></label>
+          <label class="field"><span>联系方式</span><input id="admin-user-edit-contact" name="adminUserEditContact" class="edit-input" v-model="editForm.contact" placeholder="邮箱或手机号（可选）" /></label>
+          <label class="field"><span>到期时间</span><input id="admin-user-edit-expire-at" name="adminUserEditExpireAt" class="edit-input" v-model="editForm.expire_at" type="date" /></label>
           <div class="field token-field" @click.stop>
             <span>订阅 Token</span>
             <div class="token-row">
@@ -143,7 +146,7 @@
               <span class="status" :class="statusClass(editForm.status || '')">{{ statusLabel(editForm.status || '') }}</span>
             </div>
           </label>
-          <label class="field token-field"><span>备注</span><textarea class="edit-input" v-model="editForm.note" rows="3" placeholder="可修改备注"></textarea></label>
+          <label class="field token-field"><span>备注</span><textarea id="admin-user-edit-note" name="adminUserEditNote" class="edit-input" v-model="editForm.note" rows="3" placeholder="可修改备注"></textarea></label>
         </div>
         <div class="modal-actions">
           <p v-if="editError" class="modal-error">{{ editError }}</p>
@@ -162,6 +165,8 @@
         <div class="modal-body form-single">
           <label>用户名
             <input
+              id="admin-user-add-username"
+              name="adminUserAddUsername"
               v-model="addForm.username"
               placeholder="输入唯一的用户名"
               :class="{ 'is-error': !!addFieldError.username }"
@@ -172,8 +177,11 @@
           <label>密码
             <div class="password-row" :class="{ 'is-error-wrap': !!addFieldError.password }">
               <input
+                id="admin-user-add-password"
+                name="adminUserAddPassword"
                 v-model="addForm.password"
                 :type="showAddPassword ? 'text' : 'password'"
+                autocomplete="new-password"
                 placeholder="设置初始密码"
                 :class="{ 'is-error': !!addFieldError.password }"
                 @focus="clearAddFieldError('password')"
@@ -182,9 +190,9 @@
             </div>
             <span v-if="addFieldError.password" class="field-error-bubble">{{ addFieldError.password }}</span>
           </label>
-          <label>联系方式<input v-model="addForm.contact" placeholder="邮箱或手机号（可选）" /></label>
-          <label>到期时间<input v-model="addForm.expire_at" type="date" /></label>
-          <label>备注<textarea v-model="addForm.note" rows="3" placeholder="选填，添加用户相关备注信息"></textarea></label>
+          <label>联系方式<input id="admin-user-add-contact" name="adminUserAddContact" v-model="addForm.contact" placeholder="邮箱或手机号（可选）" /></label>
+          <label>到期时间<input id="admin-user-add-expire-at" name="adminUserAddExpireAt" v-model="addForm.expire_at" type="date" /></label>
+          <label>备注<textarea id="admin-user-add-note" name="adminUserAddNote" v-model="addForm.note" rows="3" placeholder="选填，添加用户相关备注信息"></textarea></label>
         </div>
         <div class="modal-actions">
           <p v-if="addError" class="modal-error">{{ addError }}</p>

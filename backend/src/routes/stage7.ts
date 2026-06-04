@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAdmin } from "../middleware/require-role.js";
 import { activationCodesCol, authLogsCol, subAccessLogsCol } from "../lib/db.js";
 import { getRuntimeSettings, updateRuntimeSettings } from "../lib/runtime-settings.js";
+import { expireFixedActivationCodes } from "../services/activation-code-expiry.js";
 
 const router = Router();
 const require = createRequire(import.meta.url);
@@ -30,7 +31,8 @@ const settingsUpdateSchema = z.object({
 });
 
 const authLogsQuerySchema = z.object({
-  limit: z.coerce.number().int().positive().max(200).default(50),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(10),
   username: z.string().trim().min(1).max(64).optional(),
   action: z.string().trim().min(1).max(64).optional(),
   success: z
@@ -44,14 +46,16 @@ const authLogsQuerySchema = z.object({
 });
 
 const codeLogsQuerySchema = z.object({
-  limit: z.coerce.number().int().positive().max(200).default(50),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(10),
   status: z.enum(["used", "revoked"]).optional(),
   username: z.string().trim().min(1).max(64).optional(),
   code: z.string().trim().min(1).max(64).optional()
 });
 
 const subLogsQuerySchema = z.object({
-  limit: z.coerce.number().int().positive().max(500).default(100),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(10),
   username: z.string().trim().min(1).max(64).optional(),
   token: z.string().trim().min(1).max(128).optional(),
   success: z
@@ -64,6 +68,17 @@ const subLogsQuerySchema = z.object({
     }),
   target: z.string().trim().min(1).max(32).optional()
 });
+
+function pageOffset(page: number, pageSize: number) {
+  return (page - 1) * pageSize;
+}
+
+function maskLogToken(token: string | null | undefined) {
+  const value = String(token || "");
+  if (!value) return "";
+  if (value.length <= 10) return value;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
 
 router.get("/admin/settings", requireAdmin, async (_req, res) => {
   const settings = await getRuntimeSettings();
@@ -228,14 +243,20 @@ router.get("/admin/logs/auth", requireAdmin, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid query params" });
   }
-  const { limit, username, action, success } = parsed.data;
+  const { page, pageSize, username, action, success } = parsed.data;
   const filter: Record<string, unknown> = {};
   if (username) filter.username = username;
   if (action) filter.action = action;
   if (success !== undefined) filter.success = success;
 
-  const docs = await authLogsCol().find(filter).sort({ created_at: -1 }).limit(limit).toArray();
+  const [total, docs] = await Promise.all([
+    authLogsCol().countDocuments(filter),
+    authLogsCol().find(filter).sort({ created_at: -1 }).skip(pageOffset(page, pageSize)).limit(pageSize).toArray()
+  ]);
   return res.json({
+    total,
+    page,
+    pageSize,
     items: docs.map((doc) => ({
       id: String(doc._id),
       username: doc.username,
@@ -253,15 +274,22 @@ router.get("/admin/logs/code-usage", requireAdmin, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid query params" });
   }
-  const { limit, status, username, code } = parsed.data;
+  const { page, pageSize, status, username, code } = parsed.data;
+  await expireFixedActivationCodes();
   const filter: Record<string, unknown> = {};
   if (status) filter.status = status;
   if (username) filter.used_by_username = username;
   if (code) filter.code = code;
   if (!status) filter.status = { $in: ["used", "revoked"] };
 
-  const docs = await activationCodesCol().find(filter).sort({ updated_at: -1 }).limit(limit).toArray();
+  const [total, docs] = await Promise.all([
+    activationCodesCol().countDocuments(filter),
+    activationCodesCol().find(filter).sort({ updated_at: -1 }).skip(pageOffset(page, pageSize)).limit(pageSize).toArray()
+  ]);
   return res.json({
+    total,
+    page,
+    pageSize,
     items: docs.map((doc) => ({
       id: String(doc._id),
       code: doc.code,
@@ -269,8 +297,13 @@ router.get("/admin/logs/code-usage", requireAdmin, async (req, res) => {
       used_by_username: doc.used_by_username,
       used_at: doc.used_at,
       revoked_at: doc.revoked_at,
+      revokeReason: doc.revoke_reason ?? null,
       note: doc.note,
+      mode: doc.mode || "add_days",
       duration_days: doc.duration_days,
+      fixedExpireDate: doc.fixed_expire_date ?? null,
+      oldExpireAt: doc.old_expire_at ?? null,
+      newExpireAt: doc.new_expire_at ?? null,
       grace_days: doc.grace_days,
       created_at: doc.created_at,
       updated_at: doc.updated_at
@@ -283,19 +316,25 @@ router.get("/admin/logs/sub-access", requireAdmin, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid query params" });
   }
-  const { limit, username, token, success, target } = parsed.data;
+  const { page, pageSize, username, token, success, target } = parsed.data;
   const filter: Record<string, unknown> = {};
   if (username) filter.username = username;
   if (token) filter.token = token;
   if (success !== undefined) filter.success = success;
   if (target) filter.target = target;
 
-  const docs = await subAccessLogsCol().find(filter).sort({ created_at: -1 }).limit(limit).toArray();
+  const [total, docs] = await Promise.all([
+    subAccessLogsCol().countDocuments(filter),
+    subAccessLogsCol().find(filter).sort({ created_at: -1 }).skip(pageOffset(page, pageSize)).limit(pageSize).toArray()
+  ]);
   return res.json({
+    total,
+    page,
+    pageSize,
     items: docs.map((doc) => ({
       id: String(doc._id),
       username: doc.username,
-      token: doc.token,
+      token: maskLogToken(doc.token),
       target: doc.target,
       ip: doc.ip,
       status_code: doc.status_code,

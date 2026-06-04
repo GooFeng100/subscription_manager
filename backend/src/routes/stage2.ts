@@ -9,11 +9,22 @@ import {
   renewalLogsCol,
   adminsCol,
   usersCol,
+  type ActivationCodeDoc,
+  type ActivationCodeMode,
   type UserDoc
 } from "../lib/db.js";
 import { requireAdmin, requireUser } from "../middleware/require-role.js";
 import { generateSubToken } from "../lib/utils.js";
 import { deriveUserStatus, resolveDisableAfterForWrite, syncUserLifecycle } from "../services/user-lifecycle.js";
+import { expireFixedActivationCodes } from "../services/activation-code-expiry.js";
+import {
+  addShanghaiDays,
+  compareDateStrings,
+  endOfShanghaiDay,
+  formatShanghaiDate,
+  isValidDateString,
+  todayShanghaiDate
+} from "../lib/shanghai-date.js";
 
 const router = Router();
 
@@ -42,9 +53,21 @@ const createUserSchema = z.object({
 
 const createCodeSchema = z.object({
   count: z.coerce.number().int().min(1).max(100).default(1),
-  durationDays: z.coerce.number().int().min(1).max(3650),
+  mode: z.enum(["add_days", "fixed_expire_date"]).optional(),
+  days: z.coerce.number().int().min(1).max(3650).optional(),
+  durationDays: z.coerce.number().int().min(1).max(3650).optional(),
+  fixedExpireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   graceDays: z.coerce.number().int().min(0).max(365).default(3),
   note: z.string().trim().max(200).optional()
+});
+
+const updateCodeSchema = z.object({
+  mode: z.enum(["add_days", "fixed_expire_date"]).optional(),
+  days: z.coerce.number().int().min(1).max(3650).optional(),
+  durationDays: z.coerce.number().int().min(1).max(3650).optional(),
+  fixedExpireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  graceDays: z.coerce.number().int().min(0).max(365).optional(),
+  note: z.string().trim().max(200).optional().nullable()
 });
 
 const listCodesQuerySchema = z.object({
@@ -88,6 +111,100 @@ function computeNextDates(previousExpireAt: Date | null, durationDays: number, g
   const nextExpireAt = addDays(start, durationDays);
   const nextDisableAfter = addDays(nextExpireAt, graceDays);
   return { nextExpireAt, nextDisableAfter };
+}
+
+function resolveCodeMode(doc: Pick<ActivationCodeDoc, "mode" | "duration_days" | "fixed_expire_date">): ActivationCodeMode {
+  return doc.mode === "fixed_expire_date" ? "fixed_expire_date" : "add_days";
+}
+
+function displayExpireRule(mode: ActivationCodeMode, days: number, fixedExpireDate: string | null | undefined) {
+  if (mode === "fixed_expire_date") {
+    return `固定到期 ${fixedExpireDate || "-"}`;
+  }
+  return `增加 ${days} 天`;
+}
+
+function validateCodeRule(payload: {
+  mode?: ActivationCodeMode;
+  days?: number;
+  durationDays?: number;
+  fixedExpireDate?: string | null;
+}, fallback?: Pick<ActivationCodeDoc, "mode" | "duration_days" | "fixed_expire_date">) {
+  const mode = payload.mode ?? (fallback ? resolveCodeMode(fallback) : "add_days");
+  const days = payload.days ?? payload.durationDays ?? fallback?.duration_days;
+  const fixedExpireDate = payload.fixedExpireDate ?? fallback?.fixed_expire_date ?? null;
+
+  if (mode === "add_days") {
+    if (!Number.isInteger(days) || !days || days < 1 || days > 3650) {
+      return { ok: false as const, message: "durationDays must be 1-3650" };
+    }
+    return {
+      ok: true as const,
+      mode,
+      durationDays: days,
+      fixedExpireDate: null
+    };
+  }
+
+  if (!fixedExpireDate || !isValidDateString(fixedExpireDate)) {
+    return { ok: false as const, message: "fixedExpireDate must be YYYY-MM-DD" };
+  }
+  if (compareDateStrings(fixedExpireDate, todayShanghaiDate()) < 0) {
+    return { ok: false as const, message: "fixedExpireDate cannot be earlier than today" };
+  }
+  return {
+    ok: true as const,
+    mode,
+    durationDays: days && Number.isInteger(days) ? days : 0,
+    fixedExpireDate
+  };
+}
+
+function activationCodeView(doc: ActivationCodeDoc) {
+  const mode = resolveCodeMode(doc);
+  const fixedExpireDate = doc.fixed_expire_date ?? null;
+  return {
+    id: String(doc._id),
+    code: doc.code,
+    mode,
+    days: doc.duration_days,
+    duration_days: doc.duration_days,
+    fixedExpireDate,
+    fixed_expire_date: fixedExpireDate,
+    displayExpireRule: displayExpireRule(mode, doc.duration_days, fixedExpireDate),
+    grace_days: doc.grace_days,
+    status: doc.status,
+    used_by_username: doc.used_by_username,
+    used_at: doc.used_at,
+    oldExpireAt: doc.old_expire_at ?? null,
+    newExpireAt: doc.new_expire_at ?? null,
+    created_at: doc.created_at,
+    revoked_at: doc.revoked_at,
+    revokeReason: doc.revoke_reason ?? null,
+    note: doc.note
+  };
+}
+
+function computeRedeemExpireAt(userExpireAt: Date | null, codeDoc: ActivationCodeDoc, now = new Date()) {
+  const mode = resolveCodeMode(codeDoc);
+  if (mode === "fixed_expire_date") {
+    const fixedExpireDate = codeDoc.fixed_expire_date || "";
+    return {
+      mode,
+      expireDate: fixedExpireDate,
+      nextExpireAt: endOfShanghaiDay(fixedExpireDate)
+    };
+  }
+
+  const baseDate = userExpireAt && userExpireAt > now
+    ? formatShanghaiDate(userExpireAt)
+    : todayShanghaiDate(now);
+  const expireDate = addShanghaiDays(baseDate, codeDoc.duration_days);
+  return {
+    mode,
+    expireDate,
+    nextExpireAt: endOfShanghaiDay(expireDate)
+  };
 }
 
 function userSafeView(user: UserDoc & { _id: ObjectId }) {
@@ -363,16 +480,23 @@ router.post("/admin/codes", requireAdmin, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid request payload" });
   }
+  const rule = validateCodeRule(parsed.data);
+  if (!rule.ok) {
+    return res.status(400).json({ message: rule.message });
+  }
   const now = new Date();
   const docs = Array.from({ length: parsed.data.count }).map(() => ({
     code: generateActivationCode(),
-    duration_days: parsed.data.durationDays,
+    mode: rule.mode,
+    duration_days: rule.durationDays,
+    fixed_expire_date: rule.fixedExpireDate,
     grace_days: parsed.data.graceDays,
     status: "unused" as const,
     used_by_user_id: null,
     used_by_username: null,
     used_at: null,
     revoked_at: null,
+    revoke_reason: null,
     note: parsed.data.note || null,
     created_at: now,
     updated_at: now
@@ -381,7 +505,11 @@ router.post("/admin/codes", requireAdmin, async (req, res) => {
   return res.status(201).json({
     items: docs.map((d) => ({
       code: d.code,
+      mode: d.mode,
+      days: d.duration_days,
       duration_days: d.duration_days,
+      fixedExpireDate: d.fixed_expire_date,
+      displayExpireRule: displayExpireRule(d.mode, d.duration_days, d.fixed_expire_date),
       grace_days: d.grace_days,
       status: d.status
     }))
@@ -393,22 +521,57 @@ router.get("/admin/codes", requireAdmin, async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid query params" });
   }
+  await expireFixedActivationCodes();
   const filter = parsed.data.status ? { status: parsed.data.status } : {};
   const docs = await activationCodesCol().find(filter).sort({ created_at: -1 }).limit(parsed.data.limit).toArray();
   return res.json({
-    items: docs.map((doc) => ({
-      id: String(doc._id),
-      code: doc.code,
-      duration_days: doc.duration_days,
-      grace_days: doc.grace_days,
-      status: doc.status,
-      used_by_username: doc.used_by_username,
-      used_at: doc.used_at,
-      created_at: doc.created_at,
-      revoked_at: doc.revoked_at,
-      note: doc.note
-    }))
+    items: docs.map((doc) => activationCodeView(doc))
   });
+});
+
+router.patch("/admin/codes/:id", requireAdmin, async (req, res) => {
+  const parsed = updateCodeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid request payload" });
+  }
+  if (!ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid code id" });
+  }
+  const id = new ObjectId(req.params.id);
+  const code = await activationCodesCol().findOne({ _id: id });
+  if (!code) {
+    return res.status(404).json({ message: "Code not found" });
+  }
+  if (code.status !== "unused") {
+    return res.status(409).json({ message: "Only unused codes can be edited" });
+  }
+  const rule = validateCodeRule(parsed.data, code);
+  if (!rule.ok) {
+    return res.status(400).json({ message: rule.message });
+  }
+  const now = new Date();
+  const update: Partial<ActivationCodeDoc> & { updated_at: Date } = {
+    mode: rule.mode,
+    duration_days: rule.durationDays,
+    fixed_expire_date: rule.fixedExpireDate,
+    updated_at: now
+  };
+  if (parsed.data.graceDays !== undefined) {
+    update.grace_days = parsed.data.graceDays;
+  }
+  if (parsed.data.note !== undefined) {
+    const note = (parsed.data.note ?? "").trim();
+    update.note = note || null;
+  }
+  const updated = await activationCodesCol().findOneAndUpdate(
+    { _id: id, status: "unused" },
+    { $set: update },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    return res.status(409).json({ message: "Only unused codes can be edited" });
+  }
+  return res.json({ item: activationCodeView(updated) });
 });
 
 router.post("/admin/codes/:id/revoke", requireAdmin, async (req, res) => {
@@ -418,7 +581,7 @@ router.post("/admin/codes/:id/revoke", requireAdmin, async (req, res) => {
   const now = new Date();
   const result = await activationCodesCol().findOneAndUpdate(
     { _id: new ObjectId(req.params.id), status: "unused" },
-    { $set: { status: "revoked", revoked_at: now, updated_at: now } },
+    { $set: { status: "revoked", revoked_at: now, updated_at: now, revoke_reason: "manual" } },
     { returnDocument: "after" }
   );
   if (!result) {
@@ -460,7 +623,14 @@ router.post("/redeem", requireUser, async (req, res) => {
 
   const now = new Date();
   const codeDoc = await activationCodesCol().findOneAndUpdate(
-    { code: parsed.data.code, status: "unused" },
+    {
+      code: parsed.data.code,
+      status: "unused",
+      $or: [
+        { mode: { $ne: "fixed_expire_date" } },
+        { fixed_expire_date: { $gte: todayShanghaiDate(now) } }
+      ]
+    },
     {
       $set: {
         status: "used",
@@ -477,11 +647,7 @@ router.post("/redeem", requireUser, async (req, res) => {
     return res.status(409).json({ message: "Code invalid or already used" });
   }
 
-  const { nextExpireAt } = computeNextDates(
-    user.expire_at,
-    codeDoc.duration_days,
-    codeDoc.grace_days
-  );
+  const { mode, expireDate, nextExpireAt } = computeRedeemExpireAt(user.expire_at, codeDoc, now);
   const effectiveDisableAfter = (await resolveDisableAfterForWrite(nextExpireAt, codeDoc.grace_days, now))
     ?? addDays(atStartOfDay(nextExpireAt), codeDoc.grace_days);
 
@@ -498,12 +664,25 @@ router.post("/redeem", requireUser, async (req, res) => {
     }
   );
 
+  await activationCodesCol().updateOne(
+    { _id: codeDoc._id },
+    {
+      $set: {
+        old_expire_at: user.expire_at,
+        new_expire_at: nextExpireAt,
+        updated_at: now
+      }
+    }
+  );
+
   await renewalLogsCol().insertOne({
     user_id: userId,
     username: user.username,
     activation_code_id: codeDoc._id || null,
     activation_code: codeDoc.code,
+    mode,
     duration_days: codeDoc.duration_days,
+    fixed_expire_date: codeDoc.fixed_expire_date ?? null,
     grace_days: codeDoc.grace_days,
     previous_expire_at: user.expire_at,
     previous_disable_after: user.disable_after,
@@ -517,8 +696,12 @@ router.post("/redeem", requireUser, async (req, res) => {
   });
 
   return res.json({
-    message: "redeemed",
+    ok: true,
+    status: "active",
+    expireDate,
+    message: `兑换成功，有效期至 ${expireDate}`,
     expire_at: nextExpireAt,
+    expireAt: nextExpireAt,
     disable_after: effectiveDisableAfter
   });
 });

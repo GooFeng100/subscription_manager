@@ -14,15 +14,15 @@
       <div class="panel-body form-grid">
         <label>
           允许用户注册
-          <div class="switch-row"><input type="checkbox" v-model="form.registration_enabled" /><span>{{ form.registration_enabled ? '已开启' : '已关闭' }}</span></div>
+          <div class="switch-row"><input id="settings-registration-enabled" name="settingsRegistrationEnabled" type="checkbox" v-model="form.registration_enabled" /><span>{{ form.registration_enabled ? '已开启' : '已关闭' }}</span></div>
           <small>关闭后将禁止新用户自行注册，仅管理员可手动创建用户。</small>
         </label>
         <label>站点域名（环境变量，只读）
-          <input v-model="form.site_domain" readonly class="readonly" />
+          <input id="settings-site-domain" name="settingsSiteDomain" v-model="form.site_domain" readonly class="readonly" />
           <small>由部署环境变量与网关配置决定，此处仅展示当前生效值。</small>
         </label>
         <label><span class="label-title">订阅限流（次/分钟） <em class="req">*</em></span>
-          <input v-model.number="form.sub_rate_limit_per_minute" type="number" min="1" :class="{ 'is-error': !!fieldError.sub_rate_limit_per_minute }" @focus="clearFieldError('sub_rate_limit_per_minute')" />
+          <input id="settings-sub-rate-limit" name="settingsSubRateLimit" v-model.number="form.sub_rate_limit_per_minute" type="number" min="1" :class="{ 'is-error': !!fieldError.sub_rate_limit_per_minute }" @focus="clearFieldError('sub_rate_limit_per_minute')" />
           <small v-if="fieldError.sub_rate_limit_per_minute" class="error-text">{{ fieldError.sub_rate_limit_per_minute }}</small>
           <small>限制单用户/单 token 的订阅接口访问频率，避免高频刷新。</small>
         </label>
@@ -36,13 +36,15 @@
       <div class="panel-head"><h2>订阅转换与分流规则</h2></div>
       <div class="panel-body form-grid">
         <label><span class="label-title">转换后端默认地址</span>
-          <input :value="defaultConverterBackendUrl" readonly class="readonly" />
+          <input id="settings-default-converter-backend-url" name="settingsDefaultConverterBackendUrl" :value="defaultConverterBackendUrl" readonly class="readonly" />
           <small>系统默认使用本地 subconverter 地址；通常无需修改。</small>
         </label>
         <label>
           使用自定义转换后端
           <div class="switch-row">
             <input
+              id="settings-use-custom-converter"
+              name="settingsUseCustomConverter"
               type="checkbox"
               :checked="form.use_custom_converter_backend_url"
               @change="setCustomConverterBackendEnabled(($event.target as HTMLInputElement).checked)"
@@ -52,29 +54,29 @@
           <small>开启后可覆盖默认地址；关闭后自动回退为系统默认值。</small>
         </label>
         <label v-if="form.use_custom_converter_backend_url"><span class="label-title">自定义转换后端地址 <em class="req">*</em></span>
-          <input v-model="form.converter_backend_url" placeholder="http://subconverter:25500/sub" :class="{ 'is-error': !!fieldError.converter_backend_url }" @focus="clearFieldError('converter_backend_url')" />
+          <input id="settings-converter-backend-url" name="settingsConverterBackendUrl" v-model="form.converter_backend_url" placeholder="http://subconverter:25500/sub" :class="{ 'is-error': !!fieldError.converter_backend_url }" @focus="clearFieldError('converter_backend_url')" />
           <small v-if="fieldError.converter_backend_url" class="error-text">{{ fieldError.converter_backend_url }}</small>
           <small>系统会把已识别并合并的上游节点交给该地址对应的 subconverter 处理。</small>
         </label>
         <label><span class="label-title">默认客户端 <em class="req">*</em></span>
-          <select v-model="form.converter_default_target" :class="{ 'is-error': !!fieldError.converter_default_target }" @focus="clearFieldError('converter_default_target')">
+          <select id="settings-converter-default-target" name="settingsConverterDefaultTarget" v-model="form.converter_default_target" :class="{ 'is-error': !!fieldError.converter_default_target }" @focus="clearFieldError('converter_default_target')">
             <option v-for="option in targetOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
           <small v-if="fieldError.converter_default_target" class="error-text">{{ fieldError.converter_default_target }}</small>
           <small>用户未指定 target 时使用的客户端类型。</small>
         </label>
         <label><span class="label-title">默认分流规则 <em class="req">*</em></span>
-          <input v-model="form.converter_default_config_url" placeholder="https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" :class="{ 'is-error': !!fieldError.converter_default_config_url }" @focus="clearFieldError('converter_default_config_url')" />
+          <input id="settings-converter-default-config-url" name="settingsConverterDefaultConfigUrl" v-model="form.converter_default_config_url" placeholder="https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini" :class="{ 'is-error': !!fieldError.converter_default_config_url }" @focus="clearFieldError('converter_default_config_url')" />
           <small v-if="fieldError.converter_default_config_url" class="error-text">{{ fieldError.converter_default_config_url }}</small>
           <small>会通过 subconverter 的 config 参数传入，用于生成 Clash 策略组和规则。</small>
         </label>
         <label><span class="label-title">订阅文件名模板 <em class="req">*</em></span>
-          <input v-model="form.subscription_filename_template" placeholder="{{username}}_V{{version}}" :class="{ 'is-error': !!fieldError.subscription_filename_template }" @focus="clearFieldError('subscription_filename_template')" />
+          <input id="settings-subscription-filename-template" name="settingsSubscriptionFilenameTemplate" v-model="form.subscription_filename_template" placeholder="{{username}}_V{{version}}" :class="{ 'is-error': !!fieldError.subscription_filename_template }" @focus="clearFieldError('subscription_filename_template')" />
           <small v-if="fieldError.subscription_filename_template" class="error-text">{{ fieldError.subscription_filename_template }}</small>
           <small>可用占位符：<code v-pre>{{username}}</code>、<code v-pre>{{target}}</code>、<code v-pre>{{expire}}</code>、<code v-pre>{{version}}</code>。例如 <code v-pre>{{username}}_V{{version}}</code>。</small>
         </label>
         <label><span class="label-title">自动轮询间隔（分钟） <em class="req">*</em></span>
-          <input v-model.number="form.upstream_poll_interval_minutes" type="number" min="0" :class="{ 'is-error': !!fieldError.upstream_poll_interval_minutes }" @focus="clearFieldError('upstream_poll_interval_minutes')" />
+          <input id="settings-upstream-poll-interval" name="settingsUpstreamPollInterval" v-model.number="form.upstream_poll_interval_minutes" type="number" min="0" :class="{ 'is-error': !!fieldError.upstream_poll_interval_minutes }" @focus="clearFieldError('upstream_poll_interval_minutes')" />
           <small v-if="fieldError.upstream_poll_interval_minutes" class="error-text">{{ fieldError.upstream_poll_interval_minutes }}</small>
           <small>0 表示关闭自动轮询；大于 0 时，后台会按该间隔自动执行一次“全部测试”。</small>
         </label>
@@ -89,6 +91,8 @@
       <div class="panel-body form-grid">
         <label><span class="label-title">上游拉取代理地址</span>
           <input
+            id="settings-upstream-fetch-proxy-url"
+            name="settingsUpstreamFetchProxyUrl"
             v-model="form.upstream_fetch_proxy_url"
             placeholder="http://100.69.223.58:17890"
             :class="{ 'is-error': !!fieldError.upstream_fetch_proxy_url }"
@@ -101,6 +105,8 @@
           <span class="label-title">代理连通性测试</span>
           <div class="proxy-test-row">
             <input
+              id="settings-proxy-test-url"
+              name="settingsProxyTestUrl"
               v-model="proxyTestUrl"
               placeholder="https://api.ipify.org"
               :class="{ 'is-error': !!fieldError.proxy_test_url }"
@@ -122,22 +128,22 @@
       <div class="panel-head"><h2>安全策略</h2></div>
       <div class="panel-body form-grid">
         <label><span class="label-title">登录失败阈值 <em class="req">*</em></span>
-          <input v-model.number="form.login_fail_limit" type="number" min="1" :class="{ 'is-error': !!fieldError.login_fail_limit }" @focus="clearFieldError('login_fail_limit')" />
+          <input id="settings-login-fail-limit" name="settingsLoginFailLimit" v-model.number="form.login_fail_limit" type="number" min="1" :class="{ 'is-error': !!fieldError.login_fail_limit }" @focus="clearFieldError('login_fail_limit')" />
           <small v-if="fieldError.login_fail_limit" class="error-text">{{ fieldError.login_fail_limit }}</small>
           <small>单账号在窗口期内允许的最大失败次数，超过后触发锁定。</small>
         </label>
         <label><span class="label-title">登录锁定时长（分钟） <em class="req">*</em></span>
-          <input v-model.number="form.login_lock_minutes" type="number" min="1" :class="{ 'is-error': !!fieldError.login_lock_minutes }" @focus="clearFieldError('login_lock_minutes')" />
+          <input id="settings-login-lock-minutes" name="settingsLoginLockMinutes" v-model.number="form.login_lock_minutes" type="number" min="1" :class="{ 'is-error': !!fieldError.login_lock_minutes }" @focus="clearFieldError('login_lock_minutes')" />
           <small v-if="fieldError.login_lock_minutes" class="error-text">{{ fieldError.login_lock_minutes }}</small>
           <small>触发登录保护后，账号在此时长内禁止继续尝试登录。</small>
         </label>
         <label><span class="label-title">注册 IP 限制次数 <em class="req">*</em></span>
-          <input v-model.number="form.register_ip_limit" type="number" min="1" :class="{ 'is-error': !!fieldError.register_ip_limit }" @focus="clearFieldError('register_ip_limit')" />
+          <input id="settings-register-ip-limit" name="settingsRegisterIpLimit" v-model.number="form.register_ip_limit" type="number" min="1" :class="{ 'is-error': !!fieldError.register_ip_limit }" @focus="clearFieldError('register_ip_limit')" />
           <small v-if="fieldError.register_ip_limit" class="error-text">{{ fieldError.register_ip_limit }}</small>
           <small>同一 IP 在统计窗口内允许的最大注册次数。</small>
         </label>
         <label><span class="label-title">注册 IP 窗口（分钟） <em class="req">*</em></span>
-          <input v-model.number="form.register_ip_window_minutes" type="number" min="1" :class="{ 'is-error': !!fieldError.register_ip_window_minutes }" @focus="clearFieldError('register_ip_window_minutes')" />
+          <input id="settings-register-ip-window-minutes" name="settingsRegisterIpWindowMinutes" v-model.number="form.register_ip_window_minutes" type="number" min="1" :class="{ 'is-error': !!fieldError.register_ip_window_minutes }" @focus="clearFieldError('register_ip_window_minutes')" />
           <small v-if="fieldError.register_ip_window_minutes" class="error-text">{{ fieldError.register_ip_window_minutes }}</small>
           <small>注册频率统计周期；例如 60 表示按最近 60 分钟统计。</small>
         </label>
@@ -149,17 +155,17 @@
       <div class="panel-body form-grid">
         <label>
           启用 Turnstile 总开关
-          <div class="switch-row"><input type="checkbox" v-model="form.turnstile_enabled" /><span>{{ form.turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
+          <div class="switch-row"><input id="settings-turnstile-enabled" name="settingsTurnstileEnabled" type="checkbox" v-model="form.turnstile_enabled" /><span>{{ form.turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
           <small>总开关关闭时，登录/注册的子开关将不生效。</small>
         </label>
         <label>
           登录启用
-          <div class="switch-row"><input type="checkbox" v-model="form.login_turnstile_enabled" /><span>{{ form.login_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
+          <div class="switch-row"><input id="settings-login-turnstile-enabled" name="settingsLoginTurnstileEnabled" type="checkbox" v-model="form.login_turnstile_enabled" /><span>{{ form.login_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
           <small>控制登录页是否要求通过 Turnstile 验证。</small>
         </label>
         <label>
           注册启用
-          <div class="switch-row"><input type="checkbox" v-model="form.register_turnstile_enabled" /><span>{{ form.register_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
+          <div class="switch-row"><input id="settings-register-turnstile-enabled" name="settingsRegisterTurnstileEnabled" type="checkbox" v-model="form.register_turnstile_enabled" /><span>{{ form.register_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
           <small>控制注册页是否要求通过 Turnstile 验证。</small>
         </label>
       </div>

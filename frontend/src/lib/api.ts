@@ -23,3 +23,16 @@ export function fmtDate(value: string | null | undefined) {
   if (!value) return "-";
   return new Date(value).toLocaleString();
 }
+
+export function fmtDateOnly(value: string | null | undefined) {
+  if (!value) return "-";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+}

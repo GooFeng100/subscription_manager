@@ -41,17 +41,23 @@ export type AuthLogDoc = {
 };
 
 export type ActivationCodeStatus = "unused" | "used" | "revoked";
+export type ActivationCodeMode = "add_days" | "fixed_expire_date";
 
 export type ActivationCodeDoc = {
   _id?: ObjectId;
   code: string;
+  mode?: ActivationCodeMode;
   duration_days: number;
+  fixed_expire_date?: string | null;
   grace_days: number;
   status: ActivationCodeStatus;
   used_by_user_id: ObjectId | null;
   used_by_username: string | null;
   used_at: Date | null;
+  old_expire_at?: Date | null;
+  new_expire_at?: Date | null;
   revoked_at: Date | null;
+  revoke_reason?: "manual" | "expired_fixed_date" | null;
   note: string | null;
   created_at: Date;
   updated_at: Date;
@@ -63,7 +69,9 @@ export type RenewalLogDoc = {
   username: string;
   activation_code_id: ObjectId | null;
   activation_code: string | null;
+  mode?: ActivationCodeMode;
   duration_days: number;
+  fixed_expire_date?: string | null;
   grace_days: number;
   previous_expire_at: Date | null;
   previous_disable_after: Date | null;
@@ -201,6 +209,7 @@ export async function ensureIndexes() {
   await authLogsCol().createIndex({ username: 1, created_at: 1 });
   await activationCodesCol().createIndex({ code: 1 }, { unique: true });
   await activationCodesCol().createIndex({ status: 1, created_at: -1 });
+  await activationCodesCol().createIndex({ status: 1, mode: 1, fixed_expire_date: 1 });
   await renewalLogsCol().createIndex({ user_id: 1, created_at: -1 });
   await renewalLogsCol().createIndex({ created_at: -1 });
   await upstreamsCol().createIndex({ name: 1 }, { unique: true });

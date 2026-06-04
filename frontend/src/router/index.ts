@@ -35,6 +35,21 @@ export const router = createRouter({
 });
 
 const publicPaths = new Set(["/login", "/register"]);
+type Me = {
+  userType?: "admin" | "user";
+  dashboard?: string;
+  username?: string;
+  status?: string;
+  expire_at?: string | null;
+  disable_after?: string | null;
+  sub_token?: string | null;
+  sub_version?: string | null;
+};
+
+function clearAuthAndLogin() {
+  setBootMeCache(null);
+  return "/login";
+}
 
 router.beforeEach(async (to) => {
   if (to.path === "/") {
@@ -47,22 +62,24 @@ router.beforeEach(async (to) => {
     return true;
   }
 
-  let me: { authenticated?: boolean; userType?: "admin" | "user"; dashboard?: string } | null = null;
+  let me: Me | null = null;
   try {
-    const resp = await fetch("/api/auth/session", { credentials: "include" });
-    if (resp.ok) {
-      me = (await resp.json()) as { authenticated?: boolean; userType?: "admin" | "user"; dashboard?: string; sub_version?: string | null };
-      if (me.authenticated) {
-        setBootMeCache(me as { userType: "admin" | "user"; dashboard: string; username?: string; status?: string; expire_at?: string | null; disable_after?: string | null; sub_token?: string | null; sub_version?: string | null });
-      }
+    const resp = await fetch("/api/auth/me", { credentials: "include" });
+    if (resp.status === 401) {
+      return clearAuthAndLogin();
     }
+    if (!resp.ok) {
+      return clearAuthAndLogin();
+    }
+    me = (await resp.json()) as Me;
   } catch {
-    me = null;
+    return clearAuthAndLogin();
   }
 
-  if (!me) {
-    return "/login";
+  if (!me?.userType) {
+    return clearAuthAndLogin();
   }
+  setBootMeCache(me as Me & { userType: "admin" | "user"; dashboard: string });
 
   if (to.path === "/rotation") {
     return me.userType === "admin" ? "/admin/rotation" : "/dashboard";
@@ -74,6 +91,9 @@ router.beforeEach(async (to) => {
 
   if (to.path.startsWith("/admin") && me.userType !== "admin") {
     return "/dashboard";
+  }
+  if (to.path === "/dashboard" && me.userType !== "user") {
+    return "/admin/users";
   }
   if (!to.path.startsWith("/admin") && me.userType === "admin") {
     return "/admin/users";

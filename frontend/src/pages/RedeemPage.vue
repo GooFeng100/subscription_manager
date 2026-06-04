@@ -2,6 +2,8 @@
   <UserMobileLayout title="兑换授权码" subtitle="输入授权码延长订阅时长">
     <label class="label">授权码</label>
     <input
+      id="redeem-code"
+      name="redeemCode"
       v-model.trim="code"
       class="control mono"
       placeholder="请输入授权码"
@@ -20,7 +22,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { api, fmtDate } from "../lib/api";
+import { api, fmtDateOnly } from "../lib/api";
 import UserMobileLayout from "../components/user/UserMobileLayout.vue";
 
 const code = ref("");
@@ -36,11 +38,11 @@ async function submit() {
   }
   try {
     loading.value = true;
-    const data = await api<{ expire_at: string }>("/api/redeem", {
+    const data = await api<{ expire_at: string; expireDate?: string; message?: string }>("/api/redeem", {
       method: "POST",
       body: JSON.stringify({ code: code.value.trim().toUpperCase() })
     });
-    msg.value = `兑换成功，到期 ${fmtDate(data.expire_at)}`;
+    msg.value = data.message || `兑换成功，到期 ${data.expireDate || fmtDateOnly(data.expire_at)}`;
     error.value = false;
     code.value = "";
   } catch (e) {

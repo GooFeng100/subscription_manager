@@ -10,8 +10,8 @@
     <p v-if="notice" class="notice" :class="noticeKind">{{ notice }}</p>
 
     <div class="filters">
-      <input v-model="qName" placeholder="筛选上游名称" />
-      <select v-model="qStatus">
+      <input id="upstreams-filter-name" name="upstreamsFilterName" v-model="qName" placeholder="筛选上游名称" />
+      <select id="upstreams-filter-status" name="upstreamsFilterStatus" v-model="qStatus">
         <option value="">全部状态</option>
         <option value="enabled">启用</option>
         <option value="disabled">禁用</option>
@@ -103,9 +103,9 @@
           <button type="button" class="icon-close" @click="editOpen = false">×</button>
         </div>
         <div class="modal-form">
-          <label>名称<input v-model="editForm.name" placeholder="例如：主线路A" /></label>
+          <label>名称<input id="upstream-edit-name" name="upstreamEditName" v-model="editForm.name" placeholder="例如：主线路A" /></label>
           <label>链接类型
-            <select v-model="editForm.sourceType">
+            <select id="upstream-edit-source-type" name="upstreamEditSourceType" v-model="editForm.sourceType">
               <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
@@ -126,8 +126,8 @@
             </button>
             <small>直连连续失败后再走代理拉取。</small>
           </label>
-          <label>上游URL<input v-model="editForm.url" placeholder="https://example.com/sub?token=..." /></label>
-          <label>备注<textarea v-model="editForm.note" rows="3" placeholder="可选"></textarea></label>
+          <label>上游URL<input id="upstream-edit-url" name="upstreamEditUrl" v-model="editForm.url" placeholder="https://example.com/sub?token=..." /></label>
+          <label>备注<textarea id="upstream-edit-note" name="upstreamEditNote" v-model="editForm.note" rows="3" placeholder="可选"></textarea></label>
         </div>
         <div class="modal-actions modal-foot">
           <button type="button" @click="editOpen = false">取消</button>
@@ -155,6 +155,8 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
 import { API_BASE, api } from '../lib/api';
+
+const UPSTREAMS_POLL_INTERVAL_MS = 5000;
 
 type Item = {
   id: string;
@@ -184,6 +186,7 @@ const qStatus = ref('');
 const batching = ref(false);
 const proxyToggleBusy = ref<Record<string, boolean>>({});
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let finalRefreshPending = false;
 
 const editOpen = ref(false);
 const editing = ref(false);
@@ -333,12 +336,14 @@ async function submitDelete() {
 async function runAllTests() {
   if (batching.value) return;
   batching.value = true;
+  finalRefreshPending = true;
+  ensureRefreshTimer();
   notice.value = '测试中...';
   noticeKind.value = 'info';
-    items.value = items.value.map((item) => ({
-      ...item,
-      test_state: item.enabled ? 'testing' : (item.last_test_ok === null || item.last_test_ok === undefined ? 'idle' : (item.last_test_ok ? 'pass' : 'fail'))
-    }));
+  items.value = items.value.map((item) => ({
+    ...item,
+    test_state: item.enabled ? 'testing' : (item.last_test_ok === null || item.last_test_ok === undefined ? 'idle' : (item.last_test_ok ? 'pass' : 'fail'))
+  }));
 
   try {
     const resp = await fetch(`${API_BASE}/api/admin/upstreams/test-all`, {
@@ -446,10 +451,14 @@ async function runAllTests() {
       test_state: item.enabled ? (item.last_test_ok === null || item.last_test_ok === undefined ? 'idle' : (item.last_test_ok ? 'pass' : 'fail')) : 'idle',
       current_test_via_proxy: null
     }));
+    stopRefreshTimer();
+    finalRefreshPending = false;
+    await loadUpstreams();
   }
 }
 
 async function loadUpstreams() {
+  const wasBatching = batching.value;
   try {
     const data = await api<{
       items: any[];
@@ -462,6 +471,12 @@ async function loadUpstreams() {
       batch_test_node_count?: number;
     }>('/api/admin/upstreams');
     batching.value = !!data.batch_test_running;
+    if (batching.value) {
+      ensureRefreshTimer();
+      finalRefreshPending = true;
+    } else {
+      stopRefreshTimer();
+    }
     if (data.batch_test_running) {
       notice.value = '测试中...';
       noticeKind.value = 'info';
@@ -499,21 +514,34 @@ async function loadUpstreams() {
     notice.value = `接口读取失败：${(e as Error).message}`;
     noticeKind.value = 'error';
     items.value = [];
+    if (!batching.value) stopRefreshTimer();
+  } finally {
+    if (wasBatching && !batching.value && finalRefreshPending) {
+      finalRefreshPending = false;
+      await loadUpstreams();
+    }
   }
+}
+
+function ensureRefreshTimer() {
+  if (refreshTimer) return;
+  refreshTimer = setInterval(() => {
+    void loadUpstreams();
+  }, UPSTREAMS_POLL_INTERVAL_MS);
+}
+
+function stopRefreshTimer() {
+  if (!refreshTimer) return;
+  clearInterval(refreshTimer);
+  refreshTimer = null;
 }
 
 onMounted(async () => {
   await loadUpstreams();
-  refreshTimer = setInterval(() => {
-    void loadUpstreams();
-  }, 5000);
 });
 
 onBeforeUnmount(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer);
-    refreshTimer = null;
-  }
+  stopRefreshTimer();
 });
 </script>
 

@@ -5271,3 +5271,692 @@
 
 ### 下一步建议
 - 刷新登录页、仪表盘和系统设置页，确认会话读取与代理测试展示是否符合预期。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+只读排查线上上游配置页 `/api/admin/upstreams` 高频请求的触发原因，暂不修改业务代码。
+
+## Project Current Status
+
+- 已定位到前端上游管理页 `frontend/src/pages/AdminUpstreamsPage.vue`：页面挂载时先执行一次 `loadUpstreams()`，随后通过 `setInterval` 每 5000ms 再次调用 `loadUpstreams()`。
+- `loadUpstreams()` 内部调用 `api('/api/admin/upstreams')`，因此只要停留在 `/admin/upstreams` 页面，浏览器会持续请求 `GET /api/admin/upstreams`。
+- 当前源码和 `frontend/dist` 构建产物均显示轮询间隔为 5 秒；如果线上观测约 1 秒一次，更可能是多个标签页/浏览器实例叠加、线上实际部署包与当前产物不一致，或观测窗口内有其他刷新动作叠加。
+- 本轮未修改业务代码。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath .codex/skills/subscription-manager-project/SKILL.md -TotalCount 220`
+- `Get-Content -LiteralPath docs/TASK_STATE.md -TotalCount 120`
+- `rg -n "admin/upstreams|upstreams|fetchUpstreams|loadUpstreams|setInterval|setTimeout|watch\(|watchEffect|useInterval|poll|refresh" frontend/src backend/src -S`
+- `rg --files frontend/src`
+- `rg --files backend/src`
+- `git status --short`
+- `Get-Content -LiteralPath frontend/src/pages/AdminUpstreamsPage.vue`
+- `Get-Content -LiteralPath frontend/src/lib/api.ts`
+- `Get-Content -LiteralPath backend/src/routes/stage3.ts`
+- `rg -n "setInterval\(|admin/upstreams|5000|1000|loadUpstreams" frontend -S`
+- `rg -n "admin/upstreams|setInterval|5000|1000" frontend/dist -S`
+- `docker compose ps`（当前 Windows 环境未找到 docker 命令）
+- `Get-Content -LiteralPath frontend/src/router/index.ts`
+
+## Docker/Container Status
+
+- 本轮未重建、未重启容器。
+- 在当前 Windows/UNC 环境执行 `docker compose ps` 失败：`docker` 命令不可用，因此未能直接读取线上容器状态。
+
+## API/Interface Status
+
+- 后端 `GET /admin/upstreams` 是普通查询接口，返回上游列表和批量测试状态；未发现后端主动对该管理接口发起每秒请求。
+- 高频请求来源在前端页面轮询：`/admin/upstreams` 页面停留期间会持续请求 `/api/admin/upstreams`。
+
+## Validation Result
+
+- 源码证据：`frontend/src/pages/AdminUpstreamsPage.vue` 第 504-508 行挂载后执行 `loadUpstreams()` 并设置 `setInterval(..., 5000)`。
+- 构建产物证据：`frontend/dist/assets/index-jDx8KMW_.js` 中同样包含 `setInterval(()=>{ye()},5e3)`，且 `ye()` 请求 `/api/admin/upstreams`。
+
+## Notes / Blockers
+
+- 用户要求先不改代码，本轮仅排查和同步任务状态。
+- 如果线上确认为 1 秒级请求，需要进一步核对实际加载的 JS 文件 hash、是否多个管理页标签同时打开、以及反代/access log 中同一 session/IP 的并发来源。
+
+## Next Step
+
+- 如需降低请求频率，可后续把该页面轮询改为手动刷新、延长轮询间隔，或仅在批量测试运行中短轮询。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+优化上游管理页 `/api/admin/upstreams` 请求策略：打开页面只加载一次，仅在批量测试中轮询，并确保测试结束后再刷新一次数据库最终状态。
+
+## Project Current Status
+
+- `frontend/src/pages/AdminUpstreamsPage.vue` 已改为页面挂载时执行一次 `loadUpstreams()`，不再常驻 5 秒轮询。
+- 当后端返回 `batch_test_running=true`，或管理员点击“全部测试”进入测试中状态时，页面会启动 5 秒轮询。
+- 当批量测试结束后，页面会停止轮询，并额外执行一次 `loadUpstreams()`，用数据库中的最终测试结果刷新列表。
+- 手动新增、修改、启用/禁用、删除上游后仍保持原来的即时刷新行为。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath .codex/skills/subscription-manager-project/SKILL.md -Encoding UTF8 -TotalCount 220`
+- `Get-Content -LiteralPath frontend/src/pages/AdminUpstreamsPage.vue -Encoding UTF8`
+- `rg -n "finalRefreshPending|ensureRefreshTimer|stopRefreshTimer|loadUpstreams\\(|runAllTests|refreshTimer" frontend/src/pages/AdminUpstreamsPage.vue`
+- `npm run build --prefix frontend`（PowerShell 执行策略阻止 `npm.ps1`）
+- `npm.cmd run build --prefix frontend`（UNC 路径下 `cmd` 不支持当前目录）
+- `npm.cmd run build --prefix frontend`（映射盘路径下发现 Windows shim 缺失）
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node frontend/node_modules/vite/bin/vite.js build`（Rollup Windows optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `npm.cmd run build --prefix frontend`
+- `git diff -- frontend/src/pages/AdminUpstreamsPage.vue`
+- `git status --short frontend/package.json frontend/package-lock.json frontend/src/pages/AdminUpstreamsPage.vue docs/TASK_STATE.md`
+
+## Docker/Container Status
+
+- 本轮未重建、未重启 Docker 容器。
+- 当前 Windows 环境仍未直接读取 Docker 容器状态；本轮验证集中在前端类型检查与生产构建。
+
+## API/Interface Status
+
+- `/api/admin/upstreams` 的常驻页面轮询已取消。
+- `/api/admin/upstreams` 现在会在打开上游管理页时请求一次，在测试运行中周期请求，并在测试结束后额外请求一次以同步数据库状态。
+- 后端接口契约未变更。
+
+## Validation Result
+
+- `node frontend/node_modules/vue-tsc/index.js -b` 通过。
+- `npm.cmd run build --prefix frontend` 通过，生成 `frontend/dist/assets/index-CxIhq46v.js` 与 `frontend/dist/assets/index-CrjKtJTE.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 工作树中 `frontend/package.json` 的文件模式差异在本轮开始前已存在，当前未作为本轮业务变更处理。
+- `npm.ps1` 被 PowerShell 执行策略拦截，UNC 路径下 `npm.cmd` 会落到 `C:\\Windows`；最终使用映射盘 `X:\\subscription_manager` 完成验证。
+
+## Next Step
+
+- 如需上线，需要将新的前端构建产物部署到生产 Caddy/Nginx 静态目录，并刷新浏览器缓存确认线上加载新 hash。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+实现系统日志页面后端分页与固定高度表格布局：每页 10 条，表头固定，底部分页固定，仅日志内容区滚动。
+
+## Project Current Status
+
+- `backend/src/routes/stage7.ts` 的三个日志接口已复用原路径并新增分页返回：`items`、`total`、`page`、`pageSize`。
+- `/api/admin/logs/auth`、`/api/admin/logs/code-usage`、`/api/admin/logs/sub-access` 均支持 `page` 与 `pageSize`，默认 `page=1`、`pageSize=10`。
+- 后端按当前筛选条件统计 `total`，并只返回当前页数据，排序仍保持时间倒序/更新时间倒序。
+- 订阅访问日志接口返回的 token 已在后端遮罩，避免完整 token 进入前端响应。
+- `frontend/src/pages/AdminLogsPage.vue` 已改为固定高度日志卡片：顶部筛选区固定，中间表格区域滚动，底部分页栏固定。
+- 切换日志 Tab 与点击查询会重置当前 Tab 页码为第 1 页；上一页/下一页只请求当前日志类型的当前页。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/pages/AdminLogsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath C:\\Users\\Administrator\\.codex\\attachments\\43319f78-901e-4b79-8e37-f347ad12dd5b\\pasted-text.txt -Encoding UTF8`
+- `rg -n "日志|logs|auth-log|sub-access|code-usage" frontend/src backend/src`
+- `Get-Content -LiteralPath frontend/src/pages/AdminLogsPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath backend/src/routes/stage7.ts -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/components/admin/AdminLayout.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/App.vue -Encoding UTF8`
+- `Get-Content -LiteralPath backend/src/lib/db.ts -Encoding UTF8`
+- `npm.cmd run build --prefix backend`（Windows shim 缺失导致 `tsc` 未找到）
+- `npm.cmd run build --prefix frontend`（Windows shim 缺失导致 `vue-tsc` 未找到）
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node frontend/node_modules/vite/bin/vite.js build`（首次在仓库根目录运行未找到 `index.html`，随后在 `frontend` 目录运行通过）
+- `npm.cmd install --prefix frontend`
+- `git status --short backend/package.json frontend/package.json backend/src/routes/stage7.ts frontend/src/pages/AdminLogsPage.vue docs/TASK_STATE.md frontend/dist frontend/package-lock.json`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+- 未执行 `docker volume rm`、`docker system prune` 或任何数据库 wipe/clear 操作。
+
+## API/Interface Status
+
+- 日志接口分页已完成，默认每页 10 条。
+- 前端请求会携带 `page`、`pageSize=10` 与当前 Tab 的筛选条件。
+- 分页显示格式为 `第 X-Y 条 / 共 N 条`，无数据时显示 `第 0-0 条 / 共 0 条`。
+- 分页按钮包含 `上一页`、`当前页 / 总页数`、`下一页`，并在第一页、最后一页、加载中状态正确禁用。
+
+## Validation Result
+
+- 后端等效构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-BHZ73gVh.js` 与 `dist/assets/index-s7twjfqt.css`。
+- `npm.cmd install --prefix frontend` 用于补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 显示文件模式差异（`100755 => 100644`），内容无变更；该差异不属于本轮业务代码修改。
+- 未启动浏览器进行视觉验收；本轮已完成代码层实现与构建验证。
+
+## Next Step
+
+- 上线前将前端新构建产物发布到静态服务目录，并在浏览器打开 `/admin/logs` 验证表格高度、滚动区域、固定表头与分页栏表现。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+修复登录态/session 过期后刷新管理端页面错误跳转到 `/dashboard` 的问题，确保未登录或凭证失效时统一跳转 `/login`。
+
+## Project Current Status
+
+- `frontend/src/router/index.ts` 路由守卫已改为使用 `/api/auth/me` 校验登录态。
+- `/api/auth/me` 返回 `401`、非 2xx、请求异常或响应缺少 `userType` 时，前端会清空启动登录缓存并跳转 `/login`。
+- 未登录用户不再进入后续角色兜底逻辑，因此不会被错误导向 `/dashboard`。
+- `/dashboard` 现在只允许已登录普通用户访问；已登录管理员访问 `/dashboard` 会被导向 `/admin/users`。
+- 管理员访问 `/admin/*` 仍保持允许；普通用户访问 `/admin/*` 仍导向 `/dashboard`。
+- 管理员登录后仍由登录页导向 `/admin/users`；普通用户登录后仍导向 `/dashboard`。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/router/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "/api/auth/me|/api/auth/session|dashboard|admin/users|beforeEach|requireAuth|role|401|logout|clearAuth|setBootMeCache|auth-cache" frontend/src backend/src`
+- `Get-Content -LiteralPath frontend/src/router/index.ts -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/LoginPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/lib/auth-cache.ts -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/lib/api.ts -Encoding UTF8`
+- `Get-Content -LiteralPath backend/src/routes/auth.ts -Encoding UTF8`
+- `Get-Content -LiteralPath backend/src/middleware/require-role.ts -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/DashboardPage.vue -Encoding UTF8`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+- 未执行 `docker volume rm`、`docker system prune` 或任何数据库 wipe/clear 操作。
+
+## API/Interface Status
+
+- 前端路由守卫现在依赖后端 `/api/auth/me` 的 401 语义判断登录态失效。
+- 后端接口未修改；`/api/auth/me` 已由 `requireAuth` 在无有效 session 时返回 401。
+- `/api/auth/session` 仍保留给登录页和用户页已有逻辑使用。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-Bc8ovyKF.js` 与 `dist/assets/index-s7twjfqt.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为本轮业务变更处理。
+- 未启动浏览器进行真实 session 过期跳转验收；本轮完成代码层修复与构建验证。
+
+## Next Step
+
+- 部署前端新构建产物后，使用过期 session 刷新 `/admin/users`、`/admin/upstreams`、`/admin/settings`、`/admin/logs` 验证均跳转 `/login`。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+修复浏览器提示 `A form field element should have an id or name attribute`，提升登录/注册表单自动填充兼容性。
+
+## Project Current Status
+
+- `frontend/src/components/ui/FormField.vue` 现在会为内部 `<input>` 输出稳定的 `id` 与 `name`。
+- `FormField` 新增可选 `name` prop，默认回退顺序为显式 `name`、`autocomplete`、生成的 `fieldId`。
+- `frontend/src/pages/LoginPage.vue` 已为用户名和密码字段设置 `name`。
+- `frontend/src/pages/RegisterPage.vue` 已为用户名、密码、确认密码字段设置 `name`。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/components/ui/FormField.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/RegisterPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath frontend/src/components/ui/FormField.vue -Encoding UTF8`
+- `rg -n "<FormField|autocomplete=|<input|<textarea|<select" frontend/src/pages frontend/src/components -S`
+- `Get-Content -LiteralPath frontend/src/pages/RegisterPage.vue -Encoding UTF8`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- 后端接口未变更。
+- 前端登录/注册表单 DOM 已补充 `id` 和 `name` 属性，避免浏览器自动填充审计提示。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-ImNmlEyv.js` 与 `dist/assets/index-CAmqfZ45.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为本轮业务变更处理。
+
+## Next Step
+
+- 部署新前端产物后刷新登录/注册页，确认浏览器 DevTools 不再报告对应 form field `id/name` 提示。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+继续修复浏览器表单字段提示：系统日志页筛选区 `.filters` 中的 `input`、`select`、`button` 缺少 `id/name`。
+
+## Project Current Status
+
+- `frontend/src/pages/AdminLogsPage.vue` 的登录日志、授权码日志、订阅访问日志三个筛选区均已补充稳定的 `id` 与 `name`。
+- 已覆盖 `.filters input`、`.filters select`、`.filters button` 对应的浏览器提示来源。
+- 登录/注册页通用 `FormField` 的 `id/name` 修复保持不变。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminLogsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath frontend/src/pages/AdminLogsPage.vue -Encoding UTF8`
+- `Select-String -Path frontend/src/pages/AdminLogsPage.vue -Pattern ...`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- 后端接口未变更。
+- 前端系统日志页筛选控件 DOM 已补充 `id` 和 `name` 属性。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-DKmgifE-.js` 与 `dist/assets/index-CEeuNrUw.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为本轮业务变更处理。
+
+## Next Step
+
+- 部署新前端产物后刷新 `/admin/logs`，确认 DevTools 不再报告 `.filters input/select/button` 的 `id/name` 提示。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+将“轮询设置/轮换管理”页面中的轮换日志列表改为与系统日志一致的服务端分页形式，每页 10 条。
+
+## Project Current Status
+
+- `backend/src/routes/stage6.ts` 的 `/api/admin/rotation/logs` 已新增 `page`、`pageSize`、`reason`、`result` 查询参数。
+- 轮换日志接口现在按筛选条件返回 `items`、`total`、`page`、`pageSize`，后端只返回当前页数据。
+- `frontend/src/pages/AdminRotationPage.vue` 已移除本地 `filteredLogs` 分页/筛选方式，改为请求当前页数据。
+- 轮换日志每页固定 10 条，支持原因筛选与成功/失败筛选；点击查询会回到第 1 页。
+- 轮换日志底部新增 `第 X-Y 条 / 共 N 条`、`上一页`、`当前页 / 总页数`、`下一页`。
+- 分页按钮在第一页、最后一页、加载中状态会禁用。
+- 手动执行轮换成功后会回到第 1 页并刷新轮换日志。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage6.ts`
+- Updated: `frontend/src/pages/AdminRotationPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -LiteralPath frontend/src/pages/AdminRotationPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath backend/src/routes/stage6.ts -Encoding UTF8`
+- `rg -n "rotation/logs|logs|filteredLogs|qReason|qResult|轮换日志|pagination|pageSize" frontend/src/pages/AdminRotationPage.vue backend/src/routes/stage6.ts`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `rg -n "rotationLogsQuerySchema|pageOffset|escapeRegExp|countDocuments|pageSize|loadRotationLogs|logRangeText|logs-pagination|goLogPage|rotation-log" backend/src/routes/stage6.ts frontend/src/pages/AdminRotationPage.vue`
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- `/api/admin/rotation/logs` 已支持服务端分页与筛选。
+- 默认分页规则为 `page=1`、`pageSize=10`。
+- 前端轮换日志请求会携带 `page`、`pageSize=10`、`reason`、`result`。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-6-3bWQ0b.js` 与 `dist/assets/index-DaCUVRNe.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为本轮业务变更处理。
+- 未启动浏览器进行真实页面分页点击验收；本轮完成代码层实现与构建验证。
+
+## Next Step
+
+- 部署新前端和后端产物后，在 `/admin/rotation` 验证轮换日志筛选、上一页/下一页和 `第 X-Y 条 / 共 N 条` 展示。
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+全量修复 `frontend/src` 下表单控件缺少 `id/name` 的浏览器提示，覆盖所有 `input`、`select`、`textarea`。
+
+## Project Current Status
+
+- 已扫描 `frontend/src` 下所有 `.vue` 文件中的 `input`、`select`、`textarea`。
+- 所有源码内表单字段均已具备静态或 Vue 动态绑定的 `id` 与 `name`。
+- 登录用户名字段已按要求设置为 `id="login-username"`、`name="username"`、`autocomplete="username"`。
+- 登录密码字段已按要求设置为 `id="login-password"`、`name="password"`、`autocomplete="current-password"`。
+- 注册密码、确认密码、管理员新增/编辑用户密码、用户修改新密码均使用 `autocomplete="new-password"`。
+- 系统设置、上游订阅、授权码、用户管理、日志筛选、轮换管理、用户端兑换/密码/订阅链接等普通字段均已补充 `id/name`。
+- Cloudflare Turnstile 的输入由第三方脚本动态渲染，项目源码中没有装饰性隐藏 input 需要移除。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/components/ui/FormField.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/RegisterPage.vue`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `frontend/src/pages/AdminRotationPage.vue`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `frontend/src/pages/AdminUsersPage.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/PasswordPage.vue`
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `frontend/src/pages/RotationPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "<input|<select|<textarea|<FormField" frontend/src -S`
+- `Get-Content -LiteralPath frontend/src/components/auth/TurnstileWidget.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/components/ui/FormField.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/AdminSettingsPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/AdminUsersPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/PasswordPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/RedeemPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/RotationPage.vue -Encoding UTF8`
+- `Get-Content -LiteralPath frontend/src/pages/DashboardPage.vue -Encoding UTF8`
+- Node scan for missing `id/name` across `frontend/src/**/*.vue`
+- `npm run build --prefix frontend`（PowerShell 执行策略阻止 `npm.ps1`）
+- `npm.cmd run build --prefix frontend`（Windows shim 缺失导致 `vue-tsc` 未找到）
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- 后端接口未变更。
+- 仅前端 DOM 表单属性补充，不影响现有 `v-model`、绑定、提交逻辑。
+
+## Validation Result
+
+- 全量扫描通过：`frontend/src` 中未发现缺少 `id/name` 的 `input`、`select`、`textarea`。
+- 按要求执行 `npm run build --prefix frontend`，但被当前 Windows PowerShell 执行策略拦截。
+- `npm.cmd run build --prefix frontend` 进入脚本后因当前工作树缺少 Windows `.cmd` shim，未找到 `vue-tsc`。
+- 前端等效类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端生产构建通过：在 `frontend` 目录执行 `node node_modules/vite/bin/vite.js build`，生成 `dist/assets/index-DNHiulLI.js` 与 `dist/assets/index-BBztSGeY.css`。
+- 构建前执行了 `npm.cmd install --prefix frontend` 补齐 Windows 环境缺失的 Rollup optional dependency；npm 报告 2 个 moderate vulnerabilities，未在本轮处理。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `backend/package.json` 与 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为本轮业务变更处理。
+- 未启动浏览器逐页检查 DevTools Issues；代码层扫描与构建验证已完成。
+
+## Next Step
+
+- 部署新前端产物后，刷新登录、注册、系统设置、上游配置、用户管理、授权码、日志、轮换、用户端密码/兑换/仪表盘页面，确认浏览器不再报告表单控件缺少 `id/name`。
+
+## 2026-06-04 授权码激活模式与上海时区到期日修复
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+扩展授权码激活业务：支持“增加有效期天数”和“设置到固定日期”两种模式，管理端支持修改未使用授权码，兑换成功提示只显示 `YYYY-MM-DD`，并统一按 `Asia/Shanghai` 计算与展示到期日。
+
+## Project Current Status
+
+- 已新增后端上海日期工具，`YYYY-MM-DD` 会按 `Asia/Shanghai` 当天 `23:59:59.999` 解释并存储为 UTC `Date`。
+- 授权码数据结构已兼容新增字段：`mode`、`fixed_expire_date`、`old_expire_at`、`new_expire_at`。
+- 历史只有 `duration_days`、没有 `mode` 的授权码默认按 `add_days` 处理。
+- `add_days` 兑换规则已改为按上海日期累加：账号仍有效则从当前 `expire_at` 的上海日期累加，否则从当前上海日期累加，最终落到上海当天结束时间。
+- `fixed_expire_date` 兑换规则为直接设置账号到指定日期，不做累加；后端拒绝早于当前上海日期的固定日期。
+- 兑换仍保持一次性授权码原子占用：只允许 `status=unused` 的授权码进入兑换流程，固定日期过期码不会被标记为已使用。
+- `/api/admin/codes` 创建接口支持 `{ mode: 'add_days', days/durationDays }` 与 `{ mode: 'fixed_expire_date', fixedExpireDate }`。
+- 新增 `PATCH /api/admin/codes/:id`，仅允许修改 `unused` 授权码；`used/revoked` 后端返回 `409`。
+- 授权码列表返回 `mode`、`days`、`fixedExpireDate`、`displayExpireRule` 等展示字段。
+- 用户兑换响应返回 `ok/status/expireDate/message/expireAt/expire_at`，前端优先展示后端 `message` 或 `expireDate`，不再显示小时分钟。
+- 管理端授权码列表新增“修改”按钮，只有未使用授权码可编辑。
+- 管理端创建/编辑弹窗已支持两种激活模式，并补充业务说明文案。
+- 授权码日志接口与前端日志页已展示模式、原到期日、新到期日；到期日显示为 `YYYY-MM-DD`。
+- 未改动订阅分发核心逻辑 `/sub/:token`。
+
+## File Changes In This Round
+
+- Added: `backend/src/lib/shanghai-date.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/lib/api.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `frontend/src/pages/AdminLogsPage.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -Path .codex/skills/subscription-manager-project/SKILL.md -TotalCount 220`
+- `rg -n "授权码|redeem|activation|duration_days|expire_at|renewal|code-usage|admin/codes|codes" backend/src frontend/src docs/TASK_STATE.md`
+- `Get-Content -Path C:\Users\Administrator\.codex\attachments\cecc35cb-6829-4dba-a495-8aa53af28c72\pasted-text.txt -TotalCount 260`
+- `Get-Content -Path backend/src/lib/db.ts`
+- `Get-Content -Path backend/src/routes/stage2.ts`
+- `Get-Content -Path frontend/src/pages/AdminCodesPage.vue`
+- `Get-Content -Path frontend/src/pages/RedeemPage.vue`
+- `Get-Content -Path frontend/src/pages/DashboardPage.vue`
+- `Get-Content -Path backend/src/routes/stage7.ts`
+- `Get-Content -Path backend/src/services/user-lifecycle.ts`
+- `git status --short`
+- `rg -n "fmtDate\(|fmtDay\(|expireDate|duration_days|fixedExpire" frontend/src backend/src`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- Node scan for missing `id/name` across `frontend/src/**/*.vue`
+- `npm run build --prefix frontend`（PowerShell 执行策略阻止 `npm.ps1`）
+- `npm.cmd run build --prefix frontend`（首次因 Windows `.cmd` shim 缺失未找到 `vue-tsc`）
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `node node_modules/vite/bin/vite.js build`
+- `npm.cmd run build --prefix frontend`
+- `git diff -- backend/src/lib/db.ts backend/src/lib/shanghai-date.ts backend/src/routes/stage2.ts backend/src/routes/stage7.ts frontend/src/lib/api.ts frontend/src/pages/AdminCodesPage.vue frontend/src/pages/AdminLogsPage.vue frontend/src/pages/DashboardPage.vue frontend/src/pages/RedeemPage.vue`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+- 未执行 `docker system prune`、数据库清空、NAS 重启等禁止操作。
+
+## API/Interface Status
+
+- `POST /api/admin/codes`：支持 `add_days` 与 `fixed_expire_date` 创建模式，并保留 `durationDays` 兼容入参。
+- `GET /api/admin/codes`：返回 `mode/days/fixedExpireDate/displayExpireRule`，旧数据默认显示为“增加 N 天”。
+- `PATCH /api/admin/codes/:id`：新增未使用授权码编辑接口；非 `unused` 状态拒绝修改。
+- `POST /api/redeem`：返回 `expireDate` 与中文成功消息，兑换后到期日按上海日期计算并落在当天结束时间。
+- `GET /api/admin/logs/code-usage`：返回授权码模式与兑换前后到期时间，便于审计。
+
+## Validation Result
+
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 全量表单扫描通过：`frontend/src` 中未发现缺少 `id/name` 的 `input`、`select`、`textarea`。
+- 按要求执行 `npm run build --prefix frontend`，当前 Windows PowerShell 执行策略拦截 `npm.ps1`。
+- 执行 `npm.cmd install --prefix frontend` 补齐 Rollup optional dependency 后，`npm.cmd run build --prefix frontend` 已完整通过。
+- 前端生产构建产物：`dist/assets/index-DiFI8pI7.js`、`dist/assets/index-OdleMHIo.css`。
+- `npm.cmd install --prefix frontend` 报告 2 个 moderate vulnerabilities；未执行 `npm audit fix --force`，避免引入不相关破坏性升级。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `frontend/package.json` 显示文件模式差异（`100755 => 100644`），内容无变更；本轮未作为业务变更处理。
+- 未启动 Docker 容器或浏览器做真实页面点击验收；本轮已完成代码层实现、类型检查与生产构建验证。
+
+## Next Step
+
+- 部署新前端和后端产物后，在 `/admin/codes` 验证创建两种模式、修改 unused 授权码、used/revoked 修改按钮禁用，以及 `/redeem` 兑换成功只显示 `YYYY-MM-DD`。
+- 可继续用真实账号分别兑换 `add_days` 和 `fixed_expire_date` 授权码，检查 `/admin/logs` 授权码日志中的原到期日与新到期日。
+
+## 2026-06-04 固定到期授权码过期自动作废机制
+
+## Date
+
+2026-06-04
+
+## Round Goal
+
+优化固定到期授权码机制：未使用的固定到期授权码在固定日期过期后自动作废，避免管理端继续显示为 `unused`，并让列表、日志和兑换行为保持一致。
+
+## Project Current Status
+
+- 新增后端服务 `activation-code-expiry`，专门处理固定到期授权码自动作废。
+- 服务启动后会立即执行一次清理，随后每 1 小时执行一次轻量扫描。
+- 自动作废条件为：`status=unused`、`mode=fixed_expire_date`、`fixed_expire_date < todayShanghaiDate()`。
+- 自动作废更新字段：`status=revoked`、`revoked_at=now`、`updated_at=now`、`revoke_reason=expired_fixed_date`。
+- 手动作废会写入 `revoke_reason=manual`，便于区分审计来源。
+- `/api/admin/codes` 列表查询前会触发一次清理，管理员打开授权码页面即可看到最新状态。
+- `/api/admin/logs/code-usage` 查询前也会触发一次清理，授权码日志中可看到自动作废记录。
+- 兑换接口仍保留原有保护：过期固定到期授权码不会被兑换，也不会被兑换流程标记为 used。
+- 新增索引 `{ status: 1, mode: 1, fixed_expire_date: 1 }`，降低定时扫描成本。
+- 管理端授权码列表与授权码日志中，自动过期作废显示为“自动作废”；手动作废仍显示“已作废”。
+- 未改动订阅分发核心逻辑 `/sub/:token`。
+
+## File Changes In This Round
+
+- Added: `backend/src/services/activation-code-expiry.ts`
+- Updated: `backend/src/index.ts`
+- Updated: `backend/src/lib/db.ts`
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `frontend/src/pages/AdminLogsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -Path .codex/skills/subscription-manager-project/SKILL.md -TotalCount 220`
+- `Get-Content -Path backend/src/routes/stage2.ts -Encoding utf8`
+- `Get-Content -Path backend/src/index.ts -Encoding utf8`
+- `Get-Content -Path backend/src/lib/shanghai-date.ts -Encoding utf8`
+- `rg -n "revoked_at|null|revoke|activationCodeView|findOneAndUpdate" backend/src/routes/stage2.ts`
+- `Get-Content -Path frontend/src/pages/AdminLogsPage.vue -Encoding utf8`
+- `Get-Content -Path frontend/src/pages/AdminCodesPage.vue -Encoding utf8`
+- `git diff -- backend/src/services/activation-code-expiry.ts backend/src/index.ts backend/src/routes/stage2.ts backend/src/routes/stage7.ts backend/src/lib/db.ts`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- Node scan for missing `id/name` across `frontend/src/**/*.vue`
+- `npm.cmd run build --prefix frontend`（首次 Windows shim 缺失，`vue-tsc` 未找到）
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `npm.cmd run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+- 未执行 `docker system prune`、NAS 重启或任何破坏性命令。
+
+## API/Interface Status
+
+- `GET /api/admin/codes`：查询前自动清理过期固定到期授权码，返回状态可直接体现自动作废。
+- `GET /api/admin/logs/code-usage`：查询前自动清理，并返回 `revokeReason`。
+- `POST /api/admin/codes/:id/revoke`：手动作废写入 `revoke_reason=manual`。
+- 后台定时任务：服务启动时清理一次，之后每小时清理一次。
+
+## Validation Result
+
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 全量表单扫描通过：`frontend/src` 中未发现缺少 `id/name` 的 `input`、`select`、`textarea`。
+- 执行 `npm.cmd install --prefix frontend` 补齐 Rollup optional dependency 后，`npm.cmd run build --prefix frontend` 完整通过。
+- 前端生产构建产物：`dist/assets/index-B6iKgKFJ.js`、`dist/assets/index-DZtv6K_c.css`。
+- `npm.cmd install --prefix frontend` 报告 2 个 moderate vulnerabilities；未执行 `npm audit fix --force`，避免引入不相关破坏性升级。
+
+## Notes / Blockers
+
+- 当前 Windows 工作树中 `frontend/package.json` 仍显示文件模式差异（`100755 => 100644`），内容无变更；未作为业务变更处理。
+- 未启动 Docker 容器或真实浏览器做页面点击验收；本轮完成代码层机制、类型检查与生产构建验证。
+
+## Next Step
+
+- 部署新后端后，创建一个固定到期日早于当前上海日期的测试码（可通过测试库或临时数据），打开 `/admin/codes` 验证其自动变为“自动作废”。
+- 在 `/admin/logs` 的授权码日志中确认该记录显示为“自动作废”，并且兑换接口仍拒绝该授权码。

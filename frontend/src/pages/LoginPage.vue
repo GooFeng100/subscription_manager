@@ -4,6 +4,8 @@
       <FormField
         v-model="username"
         label="用户名"
+        id="login-username"
+        name="username"
         placeholder="请输入用户名"
         autocomplete="username"
         :icon-src="usernameIcon"
@@ -11,6 +13,8 @@
       <FormField
         v-model="password"
         label="密码"
+        id="login-password"
+        name="password"
         type="password"
         placeholder="请输入密码"
         autocomplete="current-password"

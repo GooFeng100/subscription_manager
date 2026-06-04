@@ -40,7 +40,7 @@
     </div>
 
     <label class="label">订阅链接</label>
-    <input ref="subInput" class="control mono" :value="subUrl" readonly />
+    <input id="dashboard-subscription-url" name="dashboardSubscriptionUrl" ref="subInput" class="control mono" :value="subUrl" readonly />
 
     <div class="actions">
       <button class="btn primary" @click="copyLink">{{ copyState === "copied" ? "已复制" : copyButtonText }}</button>
@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
-import { API_BASE, api, fmtDate } from "../lib/api";
+import { API_BASE, api, fmtDateOnly } from "../lib/api";
 import { takeBootMeCache } from "../lib/auth-cache";
 import UserMobileLayout from "../components/user/UserMobileLayout.vue";
 
@@ -106,16 +106,16 @@ function statusLabel(status?: string | null) {
 }
 
 function fmtDateShort(value?: string | null) {
-  if (!value) return "-";
-  return fmtDate(value).split(" ")[0] || fmtDate(value);
+  return fmtDateOnly(value);
 }
 
 function dayMeta(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return { days: 0, klass: "red" as const };
-  const now = new Date();
-  const startNow = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const nowDay = fmtDateOnly(new Date().toISOString());
+  const targetDay = fmtDateOnly(value);
+  const startNow = Date.parse(`${nowDay}T00:00:00.000Z`);
+  const startTarget = Date.parse(`${targetDay}T00:00:00.000Z`);
   const diff = Math.floor((startTarget - startNow) / 86400000);
   if (diff < 0) return { days: 0, klass: "red" as const };
   if (diff <= 7) return { days: diff, klass: "yellow" as const };

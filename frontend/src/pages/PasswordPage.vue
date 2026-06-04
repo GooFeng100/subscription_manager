@@ -1,9 +1,9 @@
 <template>
   <UserMobileLayout title="修改密码" subtitle="修改后需要重新登录">
     <label class="label">旧密码</label>
-    <input v-model.trim="oldPassword" class="control" type="password" placeholder="请输入旧密码" />
+    <input id="password-old-password" name="oldPassword" v-model.trim="oldPassword" class="control" type="password" autocomplete="current-password" placeholder="请输入旧密码" />
     <label class="label">新密码</label>
-    <input v-model.trim="newPassword" class="control" type="password" placeholder="至少8位" />
+    <input id="password-new-password" name="newPassword" v-model.trim="newPassword" class="control" type="password" autocomplete="new-password" placeholder="至少8位" />
     <p class="hint">密码至少 8 位。</p>
     <button class="btn primary" :disabled="loading" @click="submit">
       {{ loading ? "提交中..." : "确认修改" }}

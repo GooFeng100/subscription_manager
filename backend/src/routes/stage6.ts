@@ -28,9 +28,23 @@ const scheduleCreateSchema = z.object({
   minute: z.coerce.number().int().min(0).max(59),
   note: z.string().trim().max(200).optional().nullable()
 });
+const rotationLogsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(10),
+  reason: z.string().trim().min(1).max(200).optional(),
+  result: z.enum(["success", "failed"]).optional()
+});
 
 const ROTATION_CONFIRM_TEXT = "ROTATE";
 const ROTATION_SCHEDULES_KEY = "rotation_schedules";
+
+function pageOffset(page: number, pageSize: number) {
+  return (page - 1) * pageSize;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 async function getRotationSchedules() {
   const state = await systemStateCol().findOne({ key: ROTATION_SCHEDULES_KEY });
@@ -81,9 +95,24 @@ router.get("/admin/rotation/status", requireAdmin, async (_req, res) => {
   });
 });
 
-router.get("/admin/rotation/logs", requireAdmin, async (_req, res) => {
-  const logs = await rotationLogsCol().find({}).sort({ created_at: -1 }).limit(200).toArray();
+router.get("/admin/rotation/logs", requireAdmin, async (req, res) => {
+  const parsed = rotationLogsQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid query params" });
+  }
+  const { page, pageSize, reason, result } = parsed.data;
+  const filter: Record<string, unknown> = {};
+  if (reason) filter.reason = { $regex: escapeRegExp(reason), $options: "i" };
+  if (result) filter.success = result === "success";
+
+  const [total, logs] = await Promise.all([
+    rotationLogsCol().countDocuments(filter),
+    rotationLogsCol().find(filter).sort({ created_at: -1 }).skip(pageOffset(page, pageSize)).limit(pageSize).toArray()
+  ]);
   return res.json({
+    total,
+    page,
+    pageSize,
     items: logs.map((log) => ({
       id: String(log._id),
       from_version: log.from_version,
