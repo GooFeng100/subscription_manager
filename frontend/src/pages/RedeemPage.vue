@@ -1,6 +1,6 @@
 <template>
   <UserMobileLayout title="兑换授权码" subtitle="输入授权码延长订阅时长">
-    <label class="label">授权码</label>
+    <label class="label" for="redeem-code">授权码</label>
     <input
       id="redeem-code"
       name="redeemCode"

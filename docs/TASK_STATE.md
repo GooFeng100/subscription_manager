@@ -5960,3 +5960,197 @@
 
 - 部署新后端后，创建一个固定到期日早于当前上海日期的测试码（可通过测试库或临时数据），打开 `/admin/codes` 验证其自动变为“自动作废”。
 - 在 `/admin/logs` 的授权码日志中确认该记录显示为“自动作废”，并且兑换接口仍拒绝该授权码。
+
+## 2026-06-05 用户管理备注保存后不显示修复
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复管理员用户管理中编辑用户备注后，保存成功但列表备注不显示、重新打开编辑也看不到备注的问题，并确认不是前端仅渲染未对接接口。
+
+## Project Current Status
+
+- 已确认前端 `AdminUsersPage.vue` 的编辑保存会调用 `PATCH /api/admin/users/:id`，payload 中包含 `note`。
+- 已确认后端 `PATCH /api/admin/users/:userId` 会接收并写入 `note` 到 MongoDB。
+- 根因定位为后端 `userSafeView()` 返回给前端的用户对象漏掉 `contact` 与 `note` 字段。
+- 已修复 `userSafeView()`，现在用户列表、编辑保存返回、重置 token 返回等复用该 view 的接口都会带上 `contact` 与 `note`。
+- 修复后前端列表可读取 `u.note`，重新打开编辑可从接口返回的 `u.note` 回填。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -Path .codex/skills/subscription-manager-project/SKILL.md -TotalCount 220`
+- `rg -n "note|备注|editForm|submitEdit|admin/users|PATCH|save" frontend/src/pages/AdminUsersPage.vue backend/src/routes/stage2.ts backend/src/routes/auth.ts`
+- `Get-Content -Path frontend/src/pages/AdminUsersPage.vue -Encoding utf8`
+- `Get-Content -Path backend/src/routes/stage2.ts -Encoding utf8`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `git diff -- backend/src/routes/stage2.ts`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- `GET /api/admin/users`：用户 item 现在返回 `contact` 与 `note`。
+- `PATCH /api/admin/users/:userId`：保存后返回的 `item` 现在包含 `contact` 与 `note`。
+- `POST /api/admin/users/:userId/reset-token`：返回的 `item` 同样包含 `contact` 与 `note`。
+
+## Validation Result
+
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 本轮未启动真实后端容器做接口联调；代码层已确认前端请求与后端持久化均存在，修复点为接口返回对象字段遗漏。
+
+## Notes / Blockers
+
+- 无阻塞。
+- 部署新后端后，需要在 `/admin/users` 手动编辑一个用户备注，确认保存后列表立即显示，重新打开编辑仍可看到备注。
+
+## Next Step
+
+- 如需上线，请重建/重启后端容器，使 `stage2.ts` 的返回字段修复生效。
+
+## 2026-06-05 修改密码旧密码错误提示修复
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复用户修改密码时故意输错旧密码，浏览器出现 `/api/auth/change-password` 400 resource error 且页面显示英文 `Invalid request payload` 的问题，改为页面内中文用户提示，并检查改密接口行为。
+
+## Project Current Status
+
+- 已检查 `frontend/src/pages/PasswordPage.vue` 与 `backend/src/routes/auth.ts`。
+- 根因一：前端只校验新密码长度，没有校验旧密码长度；旧密码少于 8 位时会直接请求后端，触发 schema 400。
+- 根因二：旧密码长度合法但不正确时，后端返回 HTTP 400 + 英文 `Old password incorrect`，浏览器 DevTools 会显示 `Failed to load resource`。
+- 已在前端增加旧密码长度本地校验，旧密码少于 8 位时不发请求，直接提示“旧密码至少 8 位”。
+- 已将旧密码不正确改为业务失败响应：HTTP 200 + `{ ok:false, code:'old_password_incorrect', message:'旧密码不正确，请重新输入' }`，避免 DevTools resource error。
+- 后端 malformed payload 仍保留 HTTP 400，但返回中文 `请输入 8-128 位的新旧密码`。
+- 前端现在识别 `ok:false`，展示后端中文消息，不跳转登录页。
+- 修改成功时后端返回 `{ ok:true, message:'密码已修改，请重新登录' }`，前端继续成功提示并跳转登录。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `frontend/src/pages/PasswordPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "change-password|oldPassword|旧密码|Invalid request payload|password updated|old password incorrect" frontend/src backend/src`
+- `Get-Content -Path frontend/src/pages/PasswordPage.vue -Encoding utf8`
+- `Get-Content -Path backend/src/routes/auth.ts -Encoding utf8`
+- `Get-Content -Path frontend/src/lib/api.ts -Encoding utf8`
+- `node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `git diff -- backend/src/routes/auth.ts frontend/src/pages/PasswordPage.vue`
+- `npm.cmd run build --prefix frontend`（首次 Windows shim 缺失，`vue-tsc` 未找到）
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `npm.cmd run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- `POST /api/auth/change-password`：旧密码错误现在返回 HTTP 200 业务失败，页面可展示中文提示。
+- `POST /api/auth/change-password`：payload 格式错误仍返回 HTTP 400，但 message 改为中文。
+- 前端改密页：旧密码和新密码均先做长度校验，减少无效请求。
+
+## Validation Result
+
+- 后端 TypeScript 构建验证通过：`node backend/node_modules/typescript/lib/tsc.js -p backend/tsconfig.json`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 执行 `npm.cmd install --prefix frontend` 补齐 Rollup optional dependency 后，`npm.cmd run build --prefix frontend` 完整通过。
+- 前端生产构建产物：`dist/assets/index-BZpfcDNC.js`、`dist/assets/index-CrcBvLui.css`。
+- `npm.cmd install --prefix frontend` 报告 2 个 moderate vulnerabilities；未执行 `npm audit fix --force`，避免引入不相关破坏性升级。
+
+## Notes / Blockers
+
+- 未启动真实后端容器做浏览器联调；代码层已完成接口和前端提示收口。
+- 当前浏览器 DevTools 对旧密码错误不应再出现 400 resource error，因为该场景已改为 HTTP 200 业务失败。
+
+## Next Step
+
+- 部署新后端和前端后，在 `/password` 测试：旧密码少于 8 位、旧密码长度合法但错误、新密码少于 8 位、修改成功四种场景。
+
+## 2026-06-05 用户端 label 关联浏览器提示修复
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复用户端界面浏览器提示 `A <label> isn't associated with a form field`，并全量扫描前端页面避免同类问题继续出现。
+
+## Project Current Status
+
+- 已修复用户端 `/password`：旧密码、新密码 label 增加 `for`，分别关联 `password-old-password` 与 `password-new-password`。
+- 已修复用户端 `/redeem`：授权码 label 增加 `for="redeem-code"`。
+- 已修复用户端 `/dashboard`：订阅链接 label 增加 `for="dashboard-subscription-url"`；“客户端模板”不是表单字段，改为普通 `div` 标题。
+- 已全量扫描 `frontend/src` 下 `.vue` 文件中的 `<label>`：不存在未关联控件且未包裹控件的孤立 label。
+- 已复扫所有 `input/select/textarea`：均具备 `id/name`。
+- 顺手修复管理端残留的非表单 label：授权码弹窗纯标题、上游代理回退 switch 容器、用户详情只读字段容器改为非 label，减少 DevTools Issues 噪音。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/PasswordPage.vue`
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `frontend/src/pages/AdminUsersPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "<label|<input|<select|<textarea" frontend/src/pages frontend/src/components -S`
+- `Get-Content -Path frontend/src/pages/PasswordPage.vue -Encoding utf8`
+- `Get-Content -Path frontend/src/pages/RedeemPage.vue -Encoding utf8`
+- `Get-Content -Path frontend/src/pages/DashboardPage.vue -Encoding utf8`
+- Node scan for orphan labels across `frontend/src/**/*.vue`
+- Node scan for missing `id/name` across `frontend/src/**/*.vue`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `npm.cmd run build --prefix frontend`（首次 Windows shim 缺失，`vue-tsc` 未找到）
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `npm.cmd run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- 本轮仅修复前端 DOM 语义与可访问性结构，不改变 API。
+
+## Validation Result
+
+- label 关联扫描通过：`OK no orphan labels`。
+- 表单控件扫描通过：`OK all controls have id/name`。
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 执行 `npm.cmd install --prefix frontend` 补齐 Rollup optional dependency 后，`npm.cmd run build --prefix frontend` 完整通过。
+- 前端生产构建产物：`dist/assets/index-EIy665pL.js`、`dist/assets/index-CLubx2Cs.css`。
+- `npm.cmd install --prefix frontend` 报告 2 个 moderate vulnerabilities；未执行 `npm audit fix --force`，避免引入不相关破坏性升级。
+
+## Notes / Blockers
+
+- 未启动真实浏览器逐页检查 DevTools Issues；代码层扫描与构建验证已通过。
+
+## Next Step
+
+- 部署新前端后，刷新 `/dashboard`、`/redeem`、`/password`，确认 DevTools 不再出现 label 未关联表单字段提示。

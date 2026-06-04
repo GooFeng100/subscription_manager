@@ -71,7 +71,7 @@
           </fieldset>
           <template v-if="createMode === 'add_days'">
             <p class="form-hint">从账号当前到期日累加；若账号已过期或未激活，则从今天起算。</p>
-            <label>授权天数</label>
+            <div class="field-label">授权天数</div>
             <div class="day-quick">
               <button type="button" :class="{ active: createDays === 30 }" @click="setDays(30)">30天</button>
               <button type="button" :class="{ active: createDays === 90 }" @click="setDays(90)">90天</button>

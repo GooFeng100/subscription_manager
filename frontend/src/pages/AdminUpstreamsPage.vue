@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AdminLayout>
     <div class="head">
       <div>
@@ -109,8 +109,8 @@
               <option v-for="option in sourceTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </label>
-          <label>
-            代理回退
+          <div class="field switch-field">
+            <span>代理回退</span>
             <button
               type="button"
               class="toggle-switch"
@@ -125,7 +125,7 @@
               <span class="toggle-text">{{ editForm.fetchViaProxy ? '开启' : '关闭' }}</span>
             </button>
             <small>直连连续失败后再走代理拉取。</small>
-          </label>
+          </div>
           <label>上游URL<input id="upstream-edit-url" name="upstreamEditUrl" v-model="editForm.url" placeholder="https://example.com/sub?token=..." /></label>
           <label>备注<textarea id="upstream-edit-note" name="upstreamEditNote" v-model="editForm.note" rows="3" placeholder="可选"></textarea></label>
         </div>

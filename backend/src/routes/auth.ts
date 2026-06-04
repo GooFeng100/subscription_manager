@@ -39,6 +39,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(128)
 });
 
+function changePasswordPayloadMessage() {
+  return "请输入 8-128 位的新旧密码";
+}
+
 function clientIp(ip?: string) {
   return ip || "unknown";
 }
@@ -260,7 +264,7 @@ router.post("/login", async (req, res) => {
 router.post("/change-password", requireAuth, async (req, res) => {
   const parsed = changePasswordSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "Invalid request payload" });
+    return res.status(400).json({ ok: false, message: changePasswordPayloadMessage() });
   }
   const { oldPassword, newPassword } = parsed.data;
   const ip = clientIp(req.ip);
@@ -285,7 +289,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
         success: false,
         message: "old password incorrect"
       });
-      return res.status(400).json({ message: "Old password incorrect" });
+      return res.json({ ok: false, code: "old_password_incorrect", message: "旧密码不正确，请重新输入" });
     }
     const newHash = await bcrypt.hash(newPassword, 12);
     await adminsCol().updateOne(
@@ -302,7 +306,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
       message: "password updated"
     });
     req.session.destroy(() => undefined);
-    return res.json({ message: "password updated, please login again" });
+    return res.json({ ok: true, message: "密码已修改，请重新登录" });
   }
 
   const user = await usersCol().findOne({ _id: new ObjectId(sessionUserId) });
@@ -321,7 +325,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
       success: false,
       message: "old password incorrect"
     });
-    return res.status(400).json({ message: "Old password incorrect" });
+    return res.json({ ok: false, code: "old_password_incorrect", message: "旧密码不正确，请重新输入" });
   }
 
   const newHash = await bcrypt.hash(newPassword, 12);
@@ -339,7 +343,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
     message: "password updated"
   });
   req.session.destroy(() => undefined);
-  return res.json({ message: "password updated, please login again" });
+  return res.json({ ok: true, message: "密码已修改，请重新登录" });
 });
 
 router.post("/logout", async (req, res) => {

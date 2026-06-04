@@ -1,8 +1,8 @@
 <template>
   <UserMobileLayout title="修改密码" subtitle="修改后需要重新登录">
-    <label class="label">旧密码</label>
+    <label class="label" for="password-old-password">旧密码</label>
     <input id="password-old-password" name="oldPassword" v-model.trim="oldPassword" class="control" type="password" autocomplete="current-password" placeholder="请输入旧密码" />
-    <label class="label">新密码</label>
+    <label class="label" for="password-new-password">新密码</label>
     <input id="password-new-password" name="newPassword" v-model.trim="newPassword" class="control" type="password" autocomplete="new-password" placeholder="至少8位" />
     <p class="hint">密码至少 8 位。</p>
     <button class="btn primary" :disabled="loading" @click="submit">
@@ -26,6 +26,11 @@ const error = ref(false);
 const router = useRouter();
 
 async function submit() {
+  if (oldPassword.value.length < 8) {
+    msg.value = "旧密码至少 8 位";
+    error.value = true;
+    return;
+  }
   if (newPassword.value.length < 8) {
     msg.value = "新密码至少 8 位";
     error.value = true;
@@ -33,17 +38,23 @@ async function submit() {
   }
   try {
     loading.value = true;
-    await api("/api/auth/change-password", {
+    const data = await api<{ ok?: boolean; message?: string }>("/api/auth/change-password", {
       method: "POST",
       body: JSON.stringify({ oldPassword: oldPassword.value, newPassword: newPassword.value })
     });
-    msg.value = "密码已修改，请重新登录";
+    if (data.ok === false) {
+      msg.value = data.message || "修改失败，请检查旧密码";
+      error.value = true;
+      return;
+    }
+    msg.value = data.message || "密码已修改，请重新登录";
     error.value = false;
     setTimeout(() => {
       void router.push("/login");
     }, 600);
   } catch (e) {
-    msg.value = (e as Error).message;
+    const message = (e as Error).message;
+    msg.value = message === "Invalid request payload" ? "请输入 8-128 位的新旧密码" : message;
     error.value = true;
   } finally {
     loading.value = false;

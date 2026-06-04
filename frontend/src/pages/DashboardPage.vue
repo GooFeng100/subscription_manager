@@ -25,7 +25,7 @@
       </div>
     </div>
 
-    <label class="label">客户端模板</label>
+    <div class="label">客户端模板</div>
     <div class="target-buttons">
       <button
         v-for="opt in targetOptions"
@@ -39,7 +39,7 @@
       </button>
     </div>
 
-    <label class="label">订阅链接</label>
+    <label class="label" for="dashboard-subscription-url">订阅链接</label>
     <input id="dashboard-subscription-url" name="dashboardSubscriptionUrl" ref="subInput" class="control mono" :value="subUrl" readonly />
 
     <div class="actions">

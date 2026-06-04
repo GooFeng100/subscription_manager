@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <AdminLayout>
     <div class="head">
       <div>
@@ -81,24 +81,24 @@
           <button class="icon-close" type="button" @click="viewOpen = false">×</button>
         </div>
         <div class="modal-body view-grid">
-          <label class="field"><span>用户名</span><div class="value">{{ selected?.username || '-' }}</div></label>
-          <label class="field"><span>联系方式</span><div class="value">{{ selected?.contact || '-' }}</div></label>
-          <label class="field"><span>到期时间</span><div class="value">{{ fmtDay(selected?.expire_at) }}</div></label>
-          <label class="field"><span>实际失效时间</span><div class="value">{{ fmtDay(selected?.disable_after) }}</div></label>
-          <label class="field token-field">
+          <div class="field"><span>用户名</span><div class="value">{{ selected?.username || '-' }}</div></div>
+          <div class="field"><span>联系方式</span><div class="value">{{ selected?.contact || '-' }}</div></div>
+          <div class="field"><span>到期时间</span><div class="value">{{ fmtDay(selected?.expire_at) }}</div></div>
+          <div class="field"><span>实际失效时间</span><div class="value">{{ fmtDay(selected?.disable_after) }}</div></div>
+          <div class="field token-field">
             <span>订阅 Token</span>
             <div class="value mono">{{ selected?.sub_token || '-' }}</div>
-          </label>
-          <label class="field token-field">
+          </div>
+          <div class="field token-field">
             <span>状态</span>
             <div class="status-line">
               <span class="status" :class="statusClass(selected?.status || '')">{{ selected ? statusLabel(selected.status) : '-' }}</span>
             </div>
-          </label>
-          <label class="field token-field">
+          </div>
+          <div class="field token-field">
             <span>备注</span>
             <div class="value">{{ selected?.note || '-' }}</div>
-          </label>
+          </div>
         </div>
         <div class="modal-actions">
           <button type="button" @click="viewOpen = false">关闭</button>
@@ -113,7 +113,7 @@
           <button class="icon-close" type="button" @click="editOpen = false">×</button>
         </div>
         <div class="modal-body view-grid">
-          <label class="field"><span>用户名</span><div class="value">{{ editForm.username || '-' }}</div></label>
+          <div class="field"><span>用户名</span><div class="value">{{ editForm.username || '-' }}</div></div>
           <label class="field">
             <span>密码</span>
             <div class="password-row edit-input-shell" :class="{ 'is-error-wrap': !!editFieldError.password }">
@@ -140,12 +140,12 @@
               <button type="button" class="primary" @click.stop="resetTokenInEdit">重置</button>
             </div>
           </div>
-          <label class="field token-field">
+          <div class="field token-field">
             <span>状态</span>
             <div class="status-line">
               <span class="status" :class="statusClass(editForm.status || '')">{{ statusLabel(editForm.status || '') }}</span>
             </div>
-          </label>
+          </div>
           <label class="field token-field"><span>备注</span><textarea id="admin-user-edit-note" name="adminUserEditNote" class="edit-input" v-model="editForm.note" rows="3" placeholder="可修改备注"></textarea></label>
         </div>
         <div class="modal-actions">

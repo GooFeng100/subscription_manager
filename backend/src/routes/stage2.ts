@@ -211,6 +211,8 @@ function userSafeView(user: UserDoc & { _id: ObjectId }) {
   return {
     id: String(user._id),
     username: user.username,
+    contact: user.contact ?? null,
+    note: user.note ?? null,
     status: user.status,
     expire_at: user.expire_at,
     disable_after: user.disable_after,
