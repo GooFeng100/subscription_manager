@@ -6224,3 +6224,56 @@
   1. 输入错误密码，确认提示“用户名或密码错误，或账号已禁用”；
   2. 不刷新页面，直接输入正确密码并重新完成/自动刷新验证码；
   3. 确认可直接登录成功。
+
+## 2026-06-05 登录失败提示被 Turnstile 重置清空修复
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复登录时用户名/密码错误后，前端虽然收到 401，但界面没有任何错误提示的问题。
+
+## Project Current Status
+
+- 已复查 `frontend/src/pages/LoginPage.vue`。
+- 根因定位：登录失败后会重置 Turnstile，`resetWidget()` 会清空 `turnstileToken`；而登录页之前监听了 `[username, password, turnstileToken]`，只要 token 变化就会把错误提示清掉。
+- 已调整为仅监听 `[username, password]`，这样只有用户继续修改用户名或密码时才清空错误消息。
+- Turnstile 自动重置/自动刷新不再清空“用户名或密码错误，或账号已禁用”提示。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `Get-Content -Path frontend/src/pages/LoginPage.vue -Encoding utf8`
+- `Get-Content -Path frontend/src/components/auth/TurnstileWidget.vue -Encoding utf8`
+- `Get-Content -Path docs/TASK_STATE.md -Encoding utf8`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `git diff -- frontend/src/pages/LoginPage.vue`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- 本轮未改动后端接口。
+- 登录错误提示现在会稳定留在界面，直到用户继续修改用户名或密码。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 本轮改动未重新执行完整 Vite 构建；变更仅为登录页 watch 依赖缩减，风险很低。
+
+## Notes / Blockers
+
+- 无阻塞。
+- 部署新前端后，用户名/密码输错时应稳定看到“用户名或密码错误，或账号已禁用”，而不是瞬间消失。
+
+## Next Step
+
+- 部署新前端后，在登录页输入错误密码，确认错误提示稳定显示；随后直接输入正确密码并完成验证码，确认无需刷新即可登录。

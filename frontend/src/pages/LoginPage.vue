@@ -73,7 +73,7 @@ function clearMessage() {
   msgType.value = '';
 }
 
-watch([username, password, turnstileToken], () => {
+watch([username, password], () => {
   if (msgType.value === 'err') {
     clearMessage();
   }
