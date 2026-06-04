@@ -22,6 +22,7 @@
       />
       <TurnstileWidget
         v-if="turnstileEnabled && turnstileSiteKey"
+        ref="turnstileWidget"
         v-model="turnstileToken"
         :site-key="turnstileSiteKey"
       />
@@ -62,6 +63,7 @@ const msgType = ref<'ok' | 'err' | ''>('');
 const turnstileEnabled = ref(false);
 const turnstileSiteKey = ref('');
 const turnstileToken = ref('');
+const turnstileWidget = ref<InstanceType<typeof TurnstileWidget> | null>(null);
 
 const turnstileRequired = computed(() => turnstileEnabled.value && Boolean(turnstileSiteKey.value));
 
@@ -107,6 +109,9 @@ async function submit() {
   if (!result.ok) {
     msg.value = result.message;
     msgType.value = 'err';
+    if (turnstileRequired.value) {
+      turnstileWidget.value?.resetWidget();
+    }
     loading.value = false;
     return;
   }

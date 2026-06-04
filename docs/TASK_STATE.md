@@ -6154,3 +6154,73 @@
 ## Next Step
 
 - 部署新前端后，刷新 `/dashboard`、`/redeem`、`/password`，确认 DevTools 不再出现 label 未关联表单字段提示。
+
+## 2026-06-05 登录失败后 Turnstile 未重置修复
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复登录时第一次输错密码后，再次输入正确密码仍然失败、必须刷新页面后才能重新登录的问题。
+
+## Project Current Status
+
+- 已检查登录页 `frontend/src/pages/LoginPage.vue`、Turnstile 组件 `frontend/src/components/auth/TurnstileWidget.vue`、认证请求封装 `frontend/src/lib/auth-request.ts` 和后端登录接口 `backend/src/routes/auth.ts`。
+- 根因定位：第一次登录失败返回 `401` 后，前端保留并复用了已消费的 Turnstile token；Cloudflare 后续会把同一个 token 的再次校验打成 `400 Turnstile verification failed`，导致用户必须刷新页面重新拿 token。
+- 已为 `TurnstileWidget` 暴露 `resetWidget()`，可在不刷新页面的情况下重新生成验证 token。
+- 登录页在任意失败返回后，若当前启用了 Turnstile，会立即调用 `resetWidget()` 清空旧 token 并重置验证码组件。
+- 认证请求错误文案已细化：`Turnstile token required`、`Turnstile verification failed`、`Turnstile request error` 现在会映射为中文用户提示。
+- 后端登录接口未改动状态码语义：账号密码错误仍返回 `401`，验证码失败仍返回 `400`；修复点在前端 token 生命周期管理。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/components/auth/TurnstileWidget.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "turnstile|login|reset|token|required|Invalid request payload|401|400" frontend/src/pages/LoginPage.vue frontend/src/components/auth/TurnstileWidget.vue backend/src/routes/auth.ts backend/src/services/turnstile.ts`
+- `Get-Content -Path frontend/src/pages/LoginPage.vue -Encoding utf8`
+- `Get-Content -Path frontend/src/components/auth/TurnstileWidget.vue -Encoding utf8`
+- `Get-Content -Path backend/src/routes/auth.ts -Encoding utf8`
+- `Get-Content -Path frontend/src/lib/auth-request.ts -Encoding utf8`
+- `Get-Content -Path backend/src/services/turnstile.ts -Encoding utf8`
+- `Get-Content -Path backend/src/services/login-guard.ts -Encoding utf8`
+- `node frontend/node_modules/vue-tsc/index.js -b`
+- `git diff -- frontend/src/pages/LoginPage.vue frontend/src/components/auth/TurnstileWidget.vue frontend/src/lib/auth-request.ts`
+- `npm.cmd run build --prefix frontend`（首次 Windows shim 缺失，`vue-tsc` 未找到）
+- `node node_modules/vite/bin/vite.js build`（首次 Rollup optional dependency 缺失）
+- `npm.cmd install --prefix frontend`
+- `npm.cmd run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除或数据库清理。
+
+## API/Interface Status
+
+- `POST /api/auth/login`：接口本身未改动；修复点为前端在失败后重置 Turnstile token，避免重复提交已消费 token。
+- 登录错误提示现在会更清晰地区分：用户名密码错误、验证码未完成、验证码已失效、验证码校验异常。
+
+## Validation Result
+
+- 前端类型检查通过：`node frontend/node_modules/vue-tsc/index.js -b`。
+- 执行 `npm.cmd install --prefix frontend` 补齐 Rollup optional dependency 后，`npm.cmd run build --prefix frontend` 完整通过。
+- 前端生产构建产物：`dist/assets/index-BHqGPNQO.js`、`dist/assets/index-GA3Glps8.css`。
+- `npm.cmd install --prefix frontend` 报告 2 个 moderate vulnerabilities；未执行 `npm audit fix --force`，避免引入不相关破坏性升级。
+
+## Notes / Blockers
+
+- 未在真实浏览器对接线上 Turnstile 组件做实机联调；代码层已修复 token 重置逻辑与提示文案。
+- 你线上看到的 Cloudflare preload/Private Access Token 日志属于浏览器/Cloudflare 挑战平台行为，不是这次“输错一次后必须刷新”的根因。
+
+## Next Step
+
+- 部署新前端后，在登录页按以下顺序实测：
+  1. 输入错误密码，确认提示“用户名或密码错误，或账号已禁用”；
+  2. 不刷新页面，直接输入正确密码并重新完成/自动刷新验证码；
+  3. 确认可直接登录成功。

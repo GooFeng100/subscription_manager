@@ -87,6 +87,15 @@ function clearWidget() {
   }
 }
 
+function resetWidget() {
+  emit("update:modelValue", "");
+  if (widgetId.value !== null && window.turnstile?.reset) {
+    window.turnstile.reset(widgetId.value);
+    return;
+  }
+  void renderWidget();
+}
+
 async function renderWidget() {
   if (!container.value || !safeSiteKey.value) {
     emit("update:modelValue", "");
@@ -134,6 +143,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearWidget();
+});
+
+defineExpose({
+  resetWidget
 });
 </script>
 
