@@ -6,6 +6,1106 @@
 
 ## Round Goal
 
+整理当前 UI、登录、帮助页、兑换商城和授权码导出相关改动，执行发布前验证后提交、打 tag 并推送远端仓库。
+
+## Project Current Status
+
+- 发布前工作区包含用户端兑换商城、帮助页返回、登录失败协议、授权码导出优化和 Docker public 静态资源构建修复。
+- 前后端类型检查与构建均已通过。
+- 准备创建新的发布 tag，继承当前最新 tag `v2026.06.06-2` 的顺序。
+
+## File Changes In This Round
+
+- Updated: `backend/Dockerfile`
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `caddy/Dockerfile`
+- Updated: `frontend/Dockerfile`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Added: `frontend/public/redeem-assets/buy-1.png`
+- Added: `frontend/public/redeem-assets/buy-2.png`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `git status --short`
+- `git log --oneline --decorate -8`
+- `git tag --sort=-creatordate | head -20`
+- `git diff --stat`
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 登录失败常见路径已收敛为 200 + `ok:false`。
+- 兑换页商城图片静态资源已通过 Docker public 复制修复。
+- 帮助页返回逻辑支持按来源返回或按会话兜底。
+- 授权码导出改为后端条件导出并支持空结果提示。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 执行 git stage、commit、tag 和 push。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复登录输错短密码时浏览器控制台出现 `POST /api/auth/login 400` 的问题，让登录页所有可预期失败都走 `ok:false` 页面提示协议。
+
+## Project Current Status
+
+- `[backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)` 登录 schema 已改为允许任意非空密码进入统一校验，避免短密码在 schema 阶段返回 400。
+- 登录请求 payload 异常、空白用户名兜底、Turnstile 校验失败现在都返回 200 + `ok:false`，前端继续显示友好错误提示。
+- 管理员/用户密码错误、账号禁用仍保持 200 + `ok:false`。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/routes/auth.ts`
+- `sed -n '1,220p' frontend/src/lib/auth-request.ts`
+- `grep -R "status(400).*login\\|400.*Turnstile\\|turnstile\\|用户名或密码" -n backend/src frontend/src | head -120`
+- `docker compose logs --tail=120 app`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 登录失败预期改为 200 + `ok:false`，不再使用 400 表示常见登录失败。
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `backend` build: pass
+- `docker compose up -d --build app`: pass
+- 短错误密码登录请求验证: pass，返回 200 + `ok:false`
+
+## Notes / Blockers
+
+- 根因是 `loginSchema.password` 仍保留注册场景的 8 位最小长度要求，短错误密码会提前触发 400。
+
+## Next Step
+
+- 运行后端 typecheck/build，重建 `app`，并用接口请求验证短错误密码返回 200 + `ok:false`。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+调整用户端兑换页标题文案，并将帮助页固定返回登录改为按来源返回，支持从登录页或控制台进入后回到原页面。
+
+## Project Current Status
+
+- `[frontend/src/pages/RedeemPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/RedeemPage.vue)` 标题栏已改为“兑换”，副标题为“授权码兑换/续费商城”。
+- `[frontend/src/pages/RedeemPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/RedeemPage.vue)` 表单标题已从“兑换授权码”改为“授权码兑换”。
+- `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)` 顶部操作已从固定“返回登录”链接改为“返回”按钮。
+- 帮助页返回优先使用浏览器历史；如果直接打开 `/help`，会按当前会话兜底返回管理员控制台、用户控制台或登录页。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' frontend/src/pages/RedeemPage.vue`
+- `sed -n '1,260p' frontend/src/pages/HelpPage.vue`
+- `sed -n '1,180p' frontend/src/components/user/UserMobileLayout.vue`
+- `grep -R "退出\\|帮助\\|logout\\|back\\|router.back\\|/help" -n frontend/src | head -120`
+- `grep -R "to=\\\"/help\\\"\\|/help\\|帮助" -n frontend/src/pages frontend/src/components | head -80`
+- `sed -n '260,620p' frontend/src/pages/HelpPage.vue`
+- `sed -n '1,220p' frontend/src/pages/LoginPage.vue`
+- `sed -n '1,120p' frontend/src/lib/api.ts`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `/help` 仍保持公开访问，返回按钮会在无历史来源时调用 `/api/auth/me` 判断兜底返回位置。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+- `docker compose ps`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 运行前端 typecheck/build，并重建 `app` 和 `caddy` 容器。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复兑换页商城图片请求返回空白的问题，确保 `frontend/public/redeem-assets` 在 Docker 构建后被正确发布到 Caddy 静态目录。
+
+## Project Current Status
+
+- `[caddy/Dockerfile](/vol1/1000/docker/subscription_manager/caddy/Dockerfile)` 已补充 `COPY frontend/public ./public`，Caddy 前端构建会包含 public 静态资源。
+- `[frontend/Dockerfile](/vol1/1000/docker/subscription_manager/frontend/Dockerfile)` 已同步补充 `COPY frontend/public ./public`，保持 standalone 前端镜像行为一致。
+- `/redeem-assets/buy-1.png` 与 `/redeem-assets/buy-2.png` 现在返回真实 PNG，不再回退到 `index.html`。
+
+## File Changes In This Round
+
+- Updated: `caddy/Dockerfile`
+- Updated: `frontend/Dockerfile`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `docker compose exec caddy sh -c 'ls -l /srv/redeem-assets 2>/dev/null || true; find /srv -maxdepth 2 -type f | sort | grep redeem-assets || true'`
+- `curl -I http://127.0.0.1:8084/redeem-assets/buy-1.png`
+- `curl -s http://127.0.0.1:8084/redeem-assets/buy-1.png | wc -c`
+- `sed -n '1,80p' caddy/Dockerfile && sed -n '1,80p' frontend/Dockerfile`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+- `curl -I http://127.0.0.1:8084/redeem-assets/buy-2.png`
+- `docker compose ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `GET /redeem-assets/buy-1.png`: 200, `Content-Type: image/png`, `Content-Length: 2643955`
+- `GET /redeem-assets/buy-2.png`: 200, `Content-Type: image/png`, `Content-Length: 2767581`
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+- 静态图片 HTTP 响应验证: pass
+
+## Notes / Blockers
+
+- 根因是 Docker 构建阶段未复制 `frontend/public`，导致 Caddy 对图片路径回退返回 SPA 的 `index.html`。
+
+## Next Step
+
+- 刷新本地兑换页验证商城图片展示，如浏览器仍缓存旧响应可强制刷新。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+将用户端兑换页的购买区域改成“商城”样式，仅保留两张横版图片链接，去掉副标题和多余文案，并排查图片无法显示的问题。
+
+## Project Current Status
+
+- `[frontend/src/pages/RedeemPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/RedeemPage.vue)` 已改为“商城”标题，无副标题。
+- 购买区域已简化为上下排列的两张横版图片链接，不再显示详情文案、购买方案名称或副标题。
+- 图片直接引用 `[frontend/public/redeem-assets/buy-1.png](/vol1/1000/docker/subscription_manager/frontend/public/redeem-assets/buy-1.png)` 和 `[frontend/public/redeem-assets/buy-2.png](/vol1/1000/docker/subscription_manager/frontend/public/redeem-assets/buy-2.png)`。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' frontend/src/pages/RedeemPage.vue`
+- `ls -l frontend/public/redeem-assets && file frontend/public/redeem-assets/*`
+- `grep -n "redeem-assets\\|RedeemPage\\|商城" -n frontend/src/pages/RedeemPage.vue frontend/src/router/index.ts`
+- `sed -n '1,220p' frontend/Dockerfile`
+- `sed -n '1,220p' caddy/Dockerfile`
+- `find frontend/dist -maxdepth 2 -type f | sort | grep 'redeem-assets\\|index.html'`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 兑换页购买区改为两个外链图片入口，点击图片跳转对应购买详情页。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 之前模板里直接写 `/redeem-assets/...` 会被 Vite 当作模块解析，已改为脚本字符串绑定，构建恢复正常。
+
+## Next Step
+
+- 运行前端 typecheck/build，并重建 `app` 和 `caddy` 容器，确认购买图片显示正常。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+在用户端兑换页新增购买区域，使用已放好的两张图片作为套餐入口，并将图片点击跳转到对应购买详情页。
+
+## Project Current Status
+
+- `[frontend/src/pages/RedeemPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/RedeemPage.vue)` 已新增购买区域，包含两张套餐卡片和详情跳转链接。
+- `[frontend/public/redeem-assets/buy-1.png](/vol1/1000/docker/subscription_manager/frontend/public/redeem-assets/buy-1.png)` 与 `[frontend/public/redeem-assets/buy-2.png](/vol1/1000/docker/subscription_manager/frontend/public/redeem-assets/buy-2.png)` 已作为购买区图片资源被引用。
+- 兑换页保留原有授权码输入和兑换按钮，购买区域是新增的独立模块。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/RedeemPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `find frontend/src -type f | sort | grep -E 'Redeem|redeem|exchange|coupon|code|subscription|Dashboard|User'`
+- `find frontend/src -type f | sort | xargs grep -n "兑换\\|redeem\\|授权码\\|购买\\|我的订阅\\|subscription"`
+- `find frontend/public/redeem-assets -maxdepth 2 -type f | sort`
+- `sed -n '1,220p' frontend/src/pages/RedeemPage.vue`
+- `sed -n '1,220p' frontend/src/components/user/UserMobileLayout.vue`
+- `sed -n '1,120p' frontend/src/router/index.ts`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 兑换页新增购买区域，点击卡片会打开对应的购买详情链接。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 运行前后端类型检查与构建，随后重建 `app` 和 `caddy` 容器，确认兑换页购买区在本地可见。
+
+# TASK_STATE
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复登录输错密码时浏览器控制台出现 401 噪音的问题，让可预期的登录失败走 `ok:false` 协议返回，前端继续显示友好错误提示。
+
+## Project Current Status
+
+- `[backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)` 里的登录失败现在改为返回 200 + `ok:false`，不再用 401 表示“用户名或密码错误，或账号已禁用”。
+- `[frontend/src/lib/auth-request.ts](/vol1/1000/docker/subscription_manager/frontend/src/lib/auth-request.ts)` 已支持识别响应体里的 `ok:false`，并继续按统一错误消息展示给登录页。
+- `[frontend/src/pages/LoginPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/LoginPage.vue)` 的页面内错误提示逻辑保持不变。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 登录失败不再使用 401 响应码表示常见的“用户名或密码错误，或账号已禁用”。
+- 前端登录页继续显示友好的错误提示，不会因为密码错误把失败当成异常抛出。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续帮你看登录页在 Turnstile 开启时的控制台警告是否还需要进一步优化。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+补齐授权码导出在“没有匹配数据”时的用户反馈，让系统弹出轻提示但不关闭导出弹窗，并保持 1 秒自动消失。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 现在在导出结果为空时会展示轻提示弹窗，1 秒后自动消失。
+- 导出弹窗本身不会因为“无匹配结果”而关闭，用户可以继续调整条件。
+- 其余导出成功、自动关闭、键盘关闭等行为保持不变。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 无结果导出时显示轻提示弹窗，不关闭导出弹窗。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续帮你做一次浏览器验收，确认无结果提示和 1 秒自动关闭的交互细节。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复授权码导出在部分条件下误判为无匹配的问题，重点检查后端筛选器对旧数据中缺失 `mode` 字段的兼容性。
+
+## Project Current Status
+
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 的导出筛选器已放宽对 `add_days` 规则的匹配，允许缺失 `mode` 字段但本质上属于加天数的老数据被正确命中。
+- 其他导出联动和 1 秒自动关闭行为保持不变。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/backend/src/lib/db.ts`
+- `sed -n '520,760p' /vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts`
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `POST /api/admin/codes/export` 的加天数筛选现在兼容 `mode` 缺失的历史数据。
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `backend` build: pass
+- `docker compose up -d --build app`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续帮你做一次导出 7 天的浏览器验收。
+
+## Round Goal
+
+把授权码导出从前端全量拉取改成后端按条件导出，同时保留导出弹窗但增加 1 秒自动关闭选项、补强键盘与无障碍交互，并让授权码生成在数据库唯一索引下具备重试兜底。
+
+## Project Current Status
+
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 新增了后端导出接口，导出候选池与最终导出都改由服务端按状态和规则过滤。
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 的批量生成路径现在会在唯一键冲突时自动重试，数据库唯一索引继续作为最终兜底。
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 的导出弹窗继续保留联动筛选，但导出数据来源已切到后端导出接口。
+- 导出成功提示支持 1 秒自动关闭，并保留手动关闭。
+- 导出相关交互已补充 `Esc` 关闭、`aria-modal`、`aria-busy`、`aria-live` 和状态按钮 `aria-pressed` 等细节。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `POST /api/admin/codes/export` 已支持按状态、固定天数和固定到期日导出。
+- 导出弹窗的二级可选项仍是从一级状态筛选结果动态生成。
+- 导出成功后可自动关闭弹窗，也可手动关闭。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续做一次浏览器里的导出流程验收，确认 TXT 下载、剪贴板导出和自动关闭都符合预期。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+把导出弹窗的二级规则选项改成“状态先筛，规则后筛”的联动列表，只显示一级筛选结果里真实存在的固定天数和固定到期日，避免出现不存在的可选项。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 的导出弹窗已改为先按状态筛，再按状态结果动态生成可选的固定天数/固定到期日。
+- 固定天数和固定到期日现在都只能从联动列表中选择，不再支持自由输入不存在的值。
+- 导出池会在打开弹窗时按当前全部授权码重新拉取，确保可选项来源是最新数据。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 导出弹窗的二级可选项由一级状态筛选结果动态生成。
+- 不存在的固定天数/固定到期日不再出现在界面上。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续做一次浏览器里导出弹窗的实际筛选验收。
+
+## Round Goal
+
+把导出弹窗再收紧为状态横排复选框 + 单选式有效期规则，并在导出成功后弹出数量提示，关闭提示时同步关闭导出弹窗。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 的导出弹窗现在是状态横排复选框 + 两个互斥有效期规则，默认不选任何规则。
+- 导出成功会弹出结果提示，显示本次导出了多少条数据；关闭结果提示时会同步关闭导出弹窗。
+- 前端导出筛选仍保持“先状态、再有效期规则”的顺序。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '240,620p' /vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '620,980p' /vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue`
+- `npm run typecheck` in `frontend/`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run build` in `backend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 导出弹窗已支持状态横排选择与有效期规则互斥选择。
+- 导出成功弹窗已支持统计显示与联动关闭。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `backend` typecheck: pass
+- `frontend` build: pass
+- `backend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 如需，我可以继续做一次浏览器里导出流程的手工验收。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+重做授权码导出弹窗为层级复选框，仅保留有效期规则与状态筛选，并让导出按钮使用系统蓝白样式；同时继续强化批量生成授权码的唯一性和 Docker 构建稳定性。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 的导出弹窗已改为状态复选框 + 有效期规则层级复选框，移除了授权码/用户筛选项。
+- 导出支持剪贴板与 TXT 两种方式，导出按钮已改为系统蓝白色并带悬浮/点击动效。
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 的批量生成已改为批次查库去重，进一步降低重复生成概率。
+- `[backend/Dockerfile](/vol1/1000/docker/subscription_manager/backend/Dockerfile)` 与 `[caddy/Dockerfile](/vol1/1000/docker/subscription_manager/caddy/Dockerfile)` 已切换为 lockfile + `npm ci` 构建，重建稳定性已恢复。
+- 本地 `app` 与 `caddy` 容器已重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `backend/Dockerfile`
+- Updated: `caddy/Dockerfile`
+- Updated: `frontend/Dockerfile`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `rg -n "exportOpen|exportCode|exportUser|exportStatus|exportMode|fetchExportCodes|exportToClipboard|exportToTxt|exportCodes|downloadTxt|fmtExportStamp|buildCodesQuery" frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '1,260p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '260,560p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '560,860p' frontend/src/pages/AdminCodesPage.vue`
+- `npm run typecheck` in `backend/`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `backend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+- `git status -sb`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `GET /api/admin/codes` 仍支持状态、模式与分页查询。
+- `POST /api/admin/codes` 继续使用唯一生成逻辑，批量生成前会查重。
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `frontend` typecheck: pass
+- `backend` build: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接打开导出弹窗，按状态与有效期规则勾选后试试剪贴板/TXT 导出。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+把授权码页的“查询”改成“导出授权码”，支持按筛选条件、有效期规则和状态导出到剪贴板或 TXT，并修复批量生成授权码的重复风险与 Docker 构建依赖解析问题。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 已新增“导出授权码”弹窗，支持按授权码、使用用户、状态和有效期规则筛选，并可导出到剪贴板或 TXT。
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 已支持 `mode` 过滤，批量生成授权码也改为先去重再入库，避免重复生成。
+- `[backend/Dockerfile](/vol1/1000/docker/subscription_manager/backend/Dockerfile)` 与 `[caddy/Dockerfile](/vol1/1000/docker/subscription_manager/caddy/Dockerfile)` 已改为 `npm ci` + lockfile 构建，解决了容器内 `npm install` 的依赖解析失败。
+- 本地 `app` 与 `caddy` 容器已经重新构建并启动。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `backend/Dockerfile`
+- Updated: `caddy/Dockerfile`
+- Updated: `frontend/Dockerfile`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '1,220p' backend/src/routes/stage2.ts`
+- `sed -n '220,420p' backend/src/routes/stage2.ts`
+- `rg -n "activationCodesCol|unique.*code|indexes|createIndex|code:" backend/src -S`
+- `git status -sb`
+- `cat frontend/package.json`
+- `sed -n '1,220p' frontend/Dockerfile`
+- `ls frontend | rg 'package-lock|pnpm-lock|yarn.lock' -n`
+- `sed -n '1,220p' backend/Dockerfile`
+- `sed -n '1,120p' frontend/package-lock.json`
+- `npm run typecheck` in `backend/`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `backend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+- `docker compose ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `GET /api/admin/codes` 现支持 `mode`、`status`、`code`、`used_by_username`、`page`、`pageSize` 查询参数。
+- `POST /api/admin/codes` 生成授权码时已加入批次去重和存在码排查。
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `frontend` typecheck: pass
+- `backend` build: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接在授权码页点“导出授权码”打开弹窗，测试剪贴板和 TXT 两种导出方式。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+将授权码统计改为全量统计，不再跟随当前列表页或筛选条件变化，并保持统计项可点击快捷筛选。
+
+## Project Current Status
+
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 已改为返回全量授权码统计，列表分页总数仍按当前筛选结果计算。
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 的说明文案已更新，明确统计口径是“全部授权码”。
+- 本轮仍只涉及授权码管理页与统计口径，没有改动其他模块。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '220,520p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,760p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,620p' backend/src/routes/stage2.ts`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- 本轮尚未重新构建容器，待验证后再重建。
+
+## API/Interface Status
+
+- `GET /api/admin/codes` 的统计口径将变为全量授权码统计。
+
+## Validation Result
+
+- 待验证。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 重新构建前后端并刷新页面，确认统计值不再随当前列表页变化。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+让授权码统计项可点击快捷筛选，并明确统计口径覆盖当前筛选条件下的全部条目而不是当前页。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 已把底部统计做成可点击的快捷筛选入口。
+- 统计文案已明确说明：统计按当前筛选条件的全部匹配条目计算，不受分页影响。
+- 本轮前端已重新构建，`app` 与 `caddy` 容器也已重建并启动。
+- 这轮没有修改后端接口，只调整了前端展示与交互。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '220,520p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,760p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,620p' backend/src/routes/stage2.ts`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接刷新页面检查统计按钮和快捷筛选效果。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+让授权码统计项可点击快捷筛选，并明确统计口径覆盖当前筛选条件下的全部条目而不是当前页。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 已把底部统计做成可点击的快捷筛选入口。
+- 统计文案已明确说明：统计按当前筛选条件的全部匹配条目计算，不受分页影响。
+- 本轮仅调整前端展示与交互，没有修改后端接口。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '220,520p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,760p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,620p' backend/src/routes/stage2.ts`
+- `npm run typecheck` in `frontend/`
+
+## Docker/Container Status
+
+- 本轮未重建容器。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 重建本地前端容器并刷新页面查看统计按钮效果。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复授权码筛选不生效的体验问题，并将统计信息与分页控件合并到同一行，随后重建本地项目查看效果。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 已增加筛选自动触发与查询按钮双保险，分页底栏改为单行显示统计和页码。
+- 本地前端已重新构建，`app` 与 `caddy` 容器也已重建并启动。
+- 这轮没有修改后端接口，只调整了前端交互与展示。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,620p' backend/src/routes/stage2.ts`
+- `git diff -- frontend/src/pages/AdminCodesPage.vue backend/src/routes/stage2.ts`
+- `rg -n "router.get\\(\\\"/admin/codes\\\"|/api/admin/codes" backend frontend/src -S`
+- `sed -n '1,220p' frontend/src/components/admin/AdminLayout.vue`
+- `sed -n '1,240p' compose.yaml`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `docker compose up -d --build app caddy`: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接刷新页面检查筛选效果和底栏布局。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+重建本地项目容器，确保浏览器加载最新的授权码分页与筛选效果。
+
+## Project Current Status
+
+- 已使用 `docker compose up -d --build app caddy` 重新构建并重启 `app` 与 `caddy`。
+- 本地前后端镜像已更新为当前仓库版本，浏览器刷新后即可查看最新页面效果。
+- MongoDB 与 Redis 未重建，仅保持运行。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/SKILL.md`
+- `rg --files -g 'docker-compose*.yml' -g 'docker-compose*.yaml' -g 'compose*.yml' -g 'compose*.yaml' -g 'Dockerfile*' -g 'subscription_manager_dev_task.md' -g 'references/project-rules.md'`
+- `git status -sb`
+- `docker compose ps`
+- `docker compose up -d --build app caddy`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- Docker 重建已完成，未发现构建失败。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接刷新本地页面查看效果。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
 授权码管理页增加状态筛选，列表改为每页 20 条的后端分页，并在表尾展示已使用 / 未使用 / 已作废 / 总数统计。
 
 ## Project Current Status

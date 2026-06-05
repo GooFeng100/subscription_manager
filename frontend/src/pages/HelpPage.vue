@@ -19,7 +19,7 @@
 
       <section class="content">
         <header class="content-header">
-          <RouterLink class="back-link" to="/login">返回登录</RouterLink>
+          <button type="button" class="back-link" @click="goBack">返回</button>
         </header>
 
         <div ref="scrollContainer" class="article-body markdown-body" v-html="activeArticleHtml"></div>
@@ -30,15 +30,22 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { marked } from 'marked';
 import { helpArticles } from '../content/help';
+import { api } from '../lib/api';
 
 type NavGroup = {
   title: string;
   items: typeof helpArticles;
 };
 
+type Me = {
+  userType?: 'admin' | 'user';
+  dashboard?: string;
+};
+
+const router = useRouter();
 const helpNavGroups: NavGroup[] = [
   {
     title: '使用教程',
@@ -148,6 +155,30 @@ async function selectArticle(id: string) {
   scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+async function goBack() {
+  const previousPath = window.history.state?.back;
+  if (typeof previousPath === 'string' && previousPath && !previousPath.startsWith('/help')) {
+    router.back();
+    return;
+  }
+
+  try {
+    const me = await api<Me>('/api/auth/me');
+    if (me.userType === 'admin') {
+      await router.push('/admin/users');
+      return;
+    }
+    if (me.userType === 'user') {
+      await router.push(me.dashboard || '/dashboard');
+      return;
+    }
+  } catch {
+    // No active session, fall back to the public entry.
+  }
+
+  await router.push('/login');
+}
+
 watch(
   () => activeArticleId.value,
   async () => {
@@ -243,6 +274,8 @@ watch(
   text-decoration: none;
   font-size: 14px;
   font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .back-link:hover {

@@ -47,6 +47,9 @@ export async function postAuthJson<T = Record<string, unknown>>(
 
     const data = await resp.json().catch(() => ({} as Record<string, unknown>));
     const message = normalizeMessage(kind, resp.status, String((data as { message?: unknown }).message || ""));
+    if (data && typeof data === "object" && (data as { ok?: unknown }).ok === false) {
+      return { ok: false, message, status: resp.status };
+    }
     if (!resp.ok) {
       return { ok: false, message, status: resp.status };
     }

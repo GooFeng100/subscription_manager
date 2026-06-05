@@ -61,6 +61,13 @@ const createCodeSchema = z.object({
   note: z.string().trim().max(200).optional()
 });
 
+const codeFilterSchema = z.object({
+  status: z.enum(["unused", "used", "revoked"]).optional(),
+  mode: z.enum(["add_days", "fixed_expire_date"]).optional(),
+  code: z.string().trim().min(1).max(128).optional(),
+  used_by_username: z.string().trim().min(1).max(64).optional()
+});
+
 const updateCodeSchema = z.object({
   mode: z.enum(["add_days", "fixed_expire_date"]).optional(),
   days: z.coerce.number().int().min(1).max(3650).optional(),
@@ -70,12 +77,17 @@ const updateCodeSchema = z.object({
   note: z.string().trim().max(200).optional().nullable()
 });
 
-const listCodesQuerySchema = z.object({
-  status: z.enum(["unused", "used", "revoked"]).optional(),
-  code: z.string().trim().min(1).max(128).optional(),
-  used_by_username: z.string().trim().min(1).max(64).optional(),
+const listCodesQuerySchema = codeFilterSchema.extend({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20)
+});
+
+const exportCodesSchema = codeFilterSchema.extend({
+  statuses: z.array(z.enum(["unused", "used", "revoked"])).optional(),
+  addDaysEnabled: z.boolean().default(false),
+  fixedDateEnabled: z.boolean().default(false),
+  days: z.array(z.coerce.number().int().min(1).max(3650)).optional(),
+  fixedExpireDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional()
 });
 
 const redeemSchema = z.object({
@@ -87,6 +99,8 @@ const manualRenewSchema = z.object({
   graceDays: z.coerce.number().int().min(0).max(365).default(3)
 });
 
+type ActivationCodeInsertDoc = Omit<ActivationCodeDoc, "_id" | "mode"> & { mode: ActivationCodeMode };
+
 function generateActivationCode() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let out = "";
@@ -94,6 +108,191 @@ function generateActivationCode() {
     out += chars[randomInt(0, chars.length)];
   }
   return out;
+}
+
+function isDuplicateKeyError(error: unknown) {
+  return Boolean(error && typeof error === "object" && Number((error as { code?: number }).code) === 11000);
+}
+
+async function generateUniqueActivationCodes(count: number) {
+  const finalCodes = new Set<string>();
+  let attempts = 0;
+  const maxAttempts = Math.max(500, count * 500);
+
+  while (finalCodes.size < count) {
+    if (attempts >= maxAttempts) {
+      throw new Error("Failed to generate unique activation codes");
+    }
+
+    const remaining = count - finalCodes.size;
+    const candidateBatch = new Set<string>();
+    const targetBatchSize = Math.max(remaining * 4, remaining + 10);
+    while (candidateBatch.size < targetBatchSize) {
+      candidateBatch.add(generateActivationCode());
+      attempts += 1;
+      if (attempts >= maxAttempts) {
+        break;
+      }
+    }
+
+    const candidates = [...candidateBatch].filter((code) => !finalCodes.has(code));
+    if (candidates.length === 0) {
+      continue;
+    }
+
+    const existingDocs = await activationCodesCol()
+      .find({ code: { $in: candidates } }, { projection: { code: 1 } })
+      .toArray();
+    const existingCodes = new Set(existingDocs.map((doc) => doc.code));
+
+    for (const code of candidates) {
+      if (!existingCodes.has(code)) {
+        finalCodes.add(code);
+      }
+      if (finalCodes.size >= count) {
+        break;
+      }
+    }
+  }
+
+  return [...finalCodes].slice(0, count);
+}
+
+function buildActivationCodeDocs(
+  codes: string[],
+  rule: { mode: ActivationCodeMode; durationDays: number; fixedExpireDate: string | null },
+  graceDays: number,
+  note: string | null,
+  createdAt: Date
+) : ActivationCodeInsertDoc[] {
+  return codes.map((code) => ({
+    code,
+    mode: rule.mode,
+    duration_days: rule.durationDays,
+    fixed_expire_date: rule.fixedExpireDate,
+    grace_days: graceDays,
+    status: "unused" as const,
+    used_by_user_id: null,
+    used_by_username: null,
+    used_at: null,
+    revoked_at: null,
+    revoke_reason: null,
+    note,
+    created_at: createdAt,
+    updated_at: createdAt
+  }));
+}
+
+function buildActivationCodeFilter(params: {
+  status?: "unused" | "used" | "revoked";
+  mode?: ActivationCodeMode;
+  code?: string;
+  used_by_username?: string;
+}) {
+  const filter: Record<string, unknown> = {};
+  if (params.status) {
+    filter.status = params.status;
+  }
+  if (params.mode) {
+    filter.mode = params.mode;
+  }
+  if (params.code) {
+    filter.code = { $regex: escapeRegex(params.code), $options: "i" };
+  }
+  if (params.used_by_username) {
+    filter.used_by_username = { $regex: escapeRegex(params.used_by_username), $options: "i" };
+  }
+  return filter;
+}
+
+function buildActivationCodeExportFilter(params: {
+  statuses?: Array<"unused" | "used" | "revoked">;
+  addDaysEnabled?: boolean;
+  fixedDateEnabled?: boolean;
+  days?: number[];
+  fixedExpireDates?: string[];
+  code?: string;
+  used_by_username?: string;
+}) {
+  const filter = buildActivationCodeFilter({
+    status: undefined,
+    mode: undefined,
+    code: params.code,
+    used_by_username: params.used_by_username
+  });
+
+  if (params.statuses?.length) {
+    filter.status = { $in: params.statuses };
+  } else if (params.statuses) {
+    filter._id = { $in: [] };
+  }
+
+  const orClauses: Record<string, unknown>[] = [];
+  if (params.addDaysEnabled) {
+    if (params.days?.length) {
+      orClauses.push({
+        mode: { $ne: "fixed_expire_date" },
+        duration_days: { $in: params.days }
+      });
+    } else {
+      orClauses.push({ _id: { $in: [] } });
+    }
+  }
+  if (params.fixedDateEnabled) {
+    if (params.fixedExpireDates?.length) {
+      orClauses.push({
+        mode: "fixed_expire_date",
+        fixed_expire_date: { $in: params.fixedExpireDates }
+      });
+    } else {
+      orClauses.push({ _id: { $in: [] } });
+    }
+  }
+  if (orClauses.length === 1) {
+    Object.assign(filter, orClauses[0]);
+  } else if (orClauses.length > 1) {
+    filter.$or = orClauses;
+  }
+
+  return filter;
+}
+
+async function insertActivationCodesWithRetry(
+  count: number,
+  rule: { mode: ActivationCodeMode; durationDays: number; fixedExpireDate: string | null },
+  graceDays: number,
+  note: string | null,
+  attempt = 0
+): Promise<ActivationCodeInsertDoc[]> {
+  const codes = await generateUniqueActivationCodes(count);
+  const now = new Date();
+  const docs = buildActivationCodeDocs(codes, rule, graceDays, note, now);
+
+  try {
+    await activationCodesCol().insertMany(docs, { ordered: false });
+    return docs;
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) {
+      throw error;
+    }
+
+    const existingDocs = await activationCodesCol()
+      .find({ code: { $in: codes } }, { projection: { code: 1 } })
+      .toArray();
+    const existingCodes = new Set(existingDocs.map((doc) => doc.code));
+    const insertedDocs = docs.filter((doc) => existingCodes.has(doc.code));
+    const remaining = count - insertedDocs.length;
+
+    if (remaining <= 0) {
+      return insertedDocs;
+    }
+    if (attempt >= 3) {
+      throw error;
+    }
+
+    const retryDocs: ActivationCodeInsertDoc[] = await insertActivationCodesWithRetry(remaining, rule, graceDays, note, attempt + 1);
+    return [...insertedDocs, ...retryDocs];
+  }
 }
 
 function addDays(base: Date, days: number) {
@@ -493,24 +692,12 @@ router.post("/admin/codes", requireAdmin, async (req, res) => {
   if (!rule.ok) {
     return res.status(400).json({ message: rule.message });
   }
-  const now = new Date();
-  const docs = Array.from({ length: parsed.data.count }).map(() => ({
-    code: generateActivationCode(),
-    mode: rule.mode,
-    duration_days: rule.durationDays,
-    fixed_expire_date: rule.fixedExpireDate,
-    grace_days: parsed.data.graceDays,
-    status: "unused" as const,
-    used_by_user_id: null,
-    used_by_username: null,
-    used_at: null,
-    revoked_at: null,
-    revoke_reason: null,
-    note: parsed.data.note || null,
-    created_at: now,
-    updated_at: now
-  }));
-  await activationCodesCol().insertMany(docs, { ordered: false });
+  const docs = await insertActivationCodesWithRetry(
+    parsed.data.count,
+    { mode: rule.mode, durationDays: rule.durationDays, fixedExpireDate: rule.fixedExpireDate },
+    parsed.data.graceDays,
+    parsed.data.note || null
+  );
   return res.status(201).json({
     items: docs.map((d) => ({
       code: d.code,
@@ -531,22 +718,12 @@ router.get("/admin/codes", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "Invalid query params" });
   }
   await expireFixedActivationCodes();
-  const filter: Record<string, unknown> = {};
-  if (parsed.data.status) {
-    filter.status = parsed.data.status;
-  }
-  if (parsed.data.code) {
-    filter.code = { $regex: escapeRegex(parsed.data.code), $options: "i" };
-  }
-  if (parsed.data.used_by_username) {
-    filter.used_by_username = { $regex: escapeRegex(parsed.data.used_by_username), $options: "i" };
-  }
+  const filter = buildActivationCodeFilter(parsed.data);
 
   const [total, statsDocs] = await Promise.all([
     activationCodesCol().countDocuments(filter),
     activationCodesCol()
       .aggregate([
-        { $match: filter },
         {
           $group: {
             _id: null,
@@ -580,6 +757,28 @@ router.get("/admin/codes", requireAdmin, async (req, res) => {
       unused: Number(stats.unused || 0),
       revoked: Number(stats.revoked || 0)
     }
+  });
+});
+
+router.post("/admin/codes/export", requireAdmin, async (req, res) => {
+  const parsed = exportCodesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Invalid request payload" });
+  }
+  await expireFixedActivationCodes();
+  const filter = buildActivationCodeExportFilter({
+    statuses: parsed.data.statuses,
+    addDaysEnabled: parsed.data.addDaysEnabled,
+    fixedDateEnabled: parsed.data.fixedDateEnabled,
+    days: parsed.data.days,
+    fixedExpireDates: parsed.data.fixedExpireDates,
+    code: parsed.data.code,
+    used_by_username: parsed.data.used_by_username
+  });
+  const docs = await activationCodesCol().find(filter).sort({ created_at: -1 }).toArray();
+  return res.json({
+    items: docs.map((doc) => activationCodeView(doc)),
+    total: docs.length
   });
 });
 

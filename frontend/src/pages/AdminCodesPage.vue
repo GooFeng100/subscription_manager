@@ -18,11 +18,12 @@
         <option value="used">已使用</option>
         <option value="revoked">已作废</option>
       </select>
-      <button type="button" :disabled="loadingCodes" @click="submitFilters">{{ loadingCodes ? '查询中...' : '查询' }}</button>
+      <button type="button" class="export-btn" :disabled="loadingCodes" @click="openExport">导出授权码</button>
       <button type="button" class="add-btn" @click="openCreate">生成授权码</button>
     </div>
 
     <div class="table-wrap">
+      <p class="table-note">统计按全部授权码计算，不受当前筛选和分页影响；点击下方统计项可快速切换状态筛选。</p>
       <table class="table">
         <thead>
           <tr>
@@ -62,25 +63,26 @@
             <td colspan="8">暂无授权码数据</td>
           </tr>
         </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="8" class="codes-summary">
-              已使用 {{ stats.used }} 个 / 未使用 {{ stats.unused }} 个 / 已作废 {{ stats.revoked }} 个 / 共 {{ stats.total }} 个
-            </td>
-          </tr>
-        </tfoot>
       </table>
-      <p class="copy-msg">{{ copyMsg }}</p>
-    </div>
-
-    <footer class="logs-pagination">
-      <span>{{ rangeText }}</span>
-      <div class="pager">
-        <button type="button" :disabled="loadingCodes || currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
-        <strong>{{ currentPage }} / {{ totalPages }}</strong>
-        <button type="button" :disabled="loadingCodes || currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+        <div class="table-footer">
+          <div class="summary-line">
+          <button type="button" class="summary-btn" :class="{ active: qStatus === 'used' }" :aria-pressed="qStatus === 'used'" @click="setStatusFilter('used')">已使用 {{ stats.used }} 个</button>
+          <span>/</span>
+          <button type="button" class="summary-btn" :class="{ active: qStatus === 'unused' }" :aria-pressed="qStatus === 'unused'" @click="setStatusFilter('unused')">未使用 {{ stats.unused }} 个</button>
+          <span>/</span>
+          <button type="button" class="summary-btn" :class="{ active: qStatus === 'revoked' }" :aria-pressed="qStatus === 'revoked'" @click="setStatusFilter('revoked')">已作废 {{ stats.revoked }} 个</button>
+          <span>/</span>
+          <button type="button" class="summary-btn" :class="{ active: qStatus === '' }" :aria-pressed="qStatus === ''" @click="clearStatusFilter">共 {{ stats.total }} 个</button>
+          </div>
+        <div class="pager">
+          <span>{{ rangeText }}</span>
+          <button type="button" :disabled="loadingCodes || currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+          <strong>{{ currentPage }} / {{ totalPages }}</strong>
+          <button type="button" :disabled="loadingCodes || currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+        </div>
       </div>
-    </footer>
+      <p class="copy-msg" role="status" aria-live="polite">{{ copyMsg }}</p>
+    </div>
 
     <div v-if="createOpen" class="modal-mask">
       <div class="modal create-modal">
@@ -116,6 +118,112 @@
         <div class="modal-actions modal-foot">
           <button type="button" @click="createOpen = false">取消</button>
           <button type="button" class="add-btn" @click="submitCreate">确认生成</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="exportOpen" class="modal-mask">
+      <div class="modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+        <div class="modal-head">
+          <h3 id="export-modal-title">导出授权码</h3>
+          <button type="button" class="icon-close" aria-label="关闭导出弹窗" @click="closeExportDialog">×</button>
+        </div>
+        <div class="modal-form" :aria-busy="exportPoolLoading">
+          <p class="form-hint">先按状态筛选，再只显示这个结果里真实存在的固定天数或固定到期日；默认勾选全部状态，且不选择任何有效期规则。</p>
+          <p v-if="exportPoolLoading" class="form-hint">正在加载可导出的授权码范围...</p>
+
+          <section class="export-section">
+            <div class="section-title">状态</div>
+            <div class="status-grid">
+              <label class="checkbox-line"><input v-model="exportStatusFlags.unused" type="checkbox" />未使用</label>
+              <label class="checkbox-line"><input v-model="exportStatusFlags.used" type="checkbox" />已使用</label>
+              <label class="checkbox-line"><input v-model="exportStatusFlags.revoked" type="checkbox" />已作废</label>
+            </div>
+          </section>
+
+          <section class="export-section">
+            <div class="section-title">有效期规则</div>
+            <label class="checkbox-line"><input :checked="exportAddDaysEnabled" type="checkbox" @change="onExportAddDaysToggle" />增加有效期天数</label>
+            <div v-if="exportAddDaysEnabled" class="nested-panel">
+              <div class="subsection-head">
+                <div class="subsection-title">可选固定天数</div>
+                <span class="subsection-count">共 {{ availableExportDays.length }} 项</span>
+              </div>
+              <p v-if="availableExportDays.length === 0" class="form-hint">当前状态下没有可选的固定天数。</p>
+              <div v-else class="choice-grid">
+                <label v-for="day in availableExportDays" :key="day" class="mini-checkbox">
+                  <input :checked="exportSelectedDays.includes(day)" type="checkbox" @change="toggleExportDay(day)" />
+                  {{ day }} 天
+                </label>
+              </div>
+              <div class="subsection-head">
+                <div class="subsection-title">已选固定天数</div>
+                <span class="subsection-count">共 {{ exportSelectedDays.length }} 项</span>
+              </div>
+              <div v-if="exportSelectedDays.length" class="tag-list">
+                <button v-for="day in exportSelectedDays" :key="day" type="button" class="tag-chip" @click="removeExportDay(day)">
+                  {{ day }} 天 <span>×</span>
+                </button>
+              </div>
+              <p v-else class="form-hint">尚未选择固定天数。</p>
+            </div>
+
+            <label class="checkbox-line"><input :checked="exportFixedDateEnabled" type="checkbox" @change="onExportFixedDateToggle" />固定到期日</label>
+            <div v-if="exportFixedDateEnabled" class="nested-panel">
+              <div class="subsection-head">
+                <div class="subsection-title">可选固定到期日</div>
+                <span class="subsection-count">共 {{ availableExportDates.length }} 项</span>
+              </div>
+              <p v-if="availableExportDates.length === 0" class="form-hint">当前状态下没有可选的固定到期日。</p>
+              <div v-else class="choice-grid">
+                <label v-for="date in availableExportDates" :key="date" class="mini-checkbox">
+                  <input :checked="exportSelectedDates.includes(date)" type="checkbox" @change="toggleExportDate(date)" />
+                  {{ date }}
+                </label>
+              </div>
+              <div class="subsection-head">
+                <div class="subsection-title">已选固定到期日</div>
+                <span class="subsection-count">共 {{ exportSelectedDates.length }} 项</span>
+              </div>
+              <div v-if="exportSelectedDates.length" class="tag-list">
+                <button v-for="date in exportSelectedDates" :key="date" type="button" class="tag-chip" @click="removeExportDate(date)">
+                  {{ date }} <span>×</span>
+                </button>
+              </div>
+              <p v-else class="form-hint">尚未选择固定到期日。</p>
+            </div>
+
+            <label class="checkbox-line"><input v-model="exportAutoCloseEnabled" type="checkbox" />导出成功后 1 秒自动关闭</label>
+            <div class="export-a11y">
+              <p class="form-hint">提示：状态复选框和规则选项都支持键盘操作，按 Esc 可关闭导出弹窗。</p>
+            </div>
+          </section>
+        </div>
+        <div class="modal-actions modal-foot">
+          <button type="button" @click="closeExportDialog">取消</button>
+          <button type="button" :disabled="exportBusy" @click="exportToClipboard">{{ exportBusy ? '导出中...' : '导出到剪贴板' }}</button>
+          <button type="button" class="export-btn" :disabled="exportBusy" @click="exportToTxt">{{ exportBusy ? '导出中...' : '导出为 TXT' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="exportSuccessOpen" class="modal-mask">
+      <div class="modal success-modal export-success-modal" role="dialog" aria-modal="true" aria-labelledby="export-success-title">
+        <div class="modal-content">
+          <h3 id="export-success-title">导出成功</h3>
+          <p class="sub">共导出 {{ exportSuccessCount }} 条授权码</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" aria-label="关闭导出成功提示" @click="closeExportSuccess">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="exportNoticeOpen" class="modal-mask notice-mask">
+      <div class="modal notice-modal" role="status" aria-live="polite" aria-atomic="true">
+        <div class="modal-content">
+          <h3>{{ exportNoticeTitle }}</h3>
+          <p class="sub">{{ exportNoticeMessage }}</p>
         </div>
       </div>
     </div>
@@ -180,7 +288,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
 import { api, fmtDateOnly } from '../lib/api';
 
@@ -237,6 +345,10 @@ type ListCodeResponse = {
     revoked?: number;
   };
 };
+type ExportCodeResponse = {
+  items: ApiCodeItem[];
+  total?: number;
+};
 
 const PAGE_SIZE = 20;
 
@@ -245,11 +357,35 @@ const error = ref('');
 const copyMsg = ref('');
 const qCode = ref('');
 const qUser = ref('');
-const qStatus = ref('');
+const qStatus = ref<'' | 'unused' | 'used' | 'revoked'>('');
 const loadingCodes = ref(false);
 const currentPage = ref(1);
 const total = ref(0);
 const stats = reactive({ total: 0, used: 0, unused: 0, revoked: 0 });
+let filterTimer: number | undefined;
+let suppressFilterWatch = false;
+const exportOpen = ref(false);
+const exportBusy = ref(false);
+const exportStatusFlags = reactive({
+  unused: true,
+  used: true,
+  revoked: true
+});
+const exportAddDaysEnabled = ref(false);
+const exportFixedDateEnabled = ref(false);
+const exportSelectedDays = ref<number[]>([]);
+const exportSelectedDates = ref<string[]>([]);
+const exportPool = ref<Item[]>([]);
+const exportPoolLoading = ref(false);
+let exportPoolTimer: number | undefined;
+const exportSuccessOpen = ref(false);
+const exportSuccessCount = ref(0);
+const exportAutoCloseEnabled = ref(true);
+let exportSuccessTimer: number | undefined;
+const exportNoticeOpen = ref(false);
+const exportNoticeTitle = ref('');
+const exportNoticeMessage = ref('');
+let exportNoticeTimer: number | undefined;
 
 const createOpen = ref(false);
 const createCount = ref(5);
@@ -322,15 +458,54 @@ function statusLabel(item: Item) {
   return status;
 }
 
+function openExport() {
+  exportStatusFlags.unused = true;
+  exportStatusFlags.used = true;
+  exportStatusFlags.revoked = true;
+  exportAddDaysEnabled.value = false;
+  exportFixedDateEnabled.value = false;
+  exportSelectedDays.value = [];
+  exportSelectedDates.value = [];
+  exportSuccessOpen.value = false;
+  exportSuccessCount.value = 0;
+  exportAutoCloseEnabled.value = true;
+  exportNoticeOpen.value = false;
+  exportNoticeTitle.value = '';
+  exportNoticeMessage.value = '';
+  exportOpen.value = true;
+  void loadExportPool();
+}
+
+function closeExportDialog() {
+  if (exportPoolTimer !== undefined) {
+    window.clearTimeout(exportPoolTimer);
+    exportPoolTimer = undefined;
+  }
+  if (exportSuccessTimer !== undefined) {
+    window.clearTimeout(exportSuccessTimer);
+    exportSuccessTimer = undefined;
+  }
+  if (exportNoticeTimer !== undefined) {
+    window.clearTimeout(exportNoticeTimer);
+    exportNoticeTimer = undefined;
+  }
+  exportPoolLoading.value = false;
+  exportOpen.value = false;
+  exportSuccessOpen.value = false;
+  exportNoticeOpen.value = false;
+}
+
 async function reloadCodes() {
   loadingCodes.value = true;
   try {
-    const query = new URLSearchParams();
-    query.set('page', String(currentPage.value));
-    query.set('pageSize', String(PAGE_SIZE));
-    if (qCode.value.trim()) query.set('code', qCode.value.trim());
-    if (qUser.value.trim()) query.set('used_by_username', qUser.value.trim());
-    if (qStatus.value.trim()) query.set('status', qStatus.value.trim());
+    const query = buildCodesQuery({
+      page: currentPage.value,
+      pageSize: PAGE_SIZE,
+      code: qCode.value.trim(),
+      user: qUser.value.trim(),
+      status: qStatus.value,
+      mode: ''
+    });
     const latest = await api<ListCodeResponse>(`/api/admin/codes?${query.toString()}`);
     items.value = (latest.items || []).map(normalizeCodeItem);
     total.value = Number(latest.total || 0);
@@ -344,9 +519,276 @@ async function reloadCodes() {
   }
 }
 
+function buildCodesQuery(params: {
+  page: number;
+  pageSize: number;
+  code?: string;
+  user?: string;
+  status?: '' | 'unused' | 'used' | 'revoked';
+  mode?: '' | 'add_days' | 'fixed_expire_date';
+}) {
+  const query = new URLSearchParams();
+  query.set('page', String(params.page));
+  query.set('pageSize', String(params.pageSize));
+  if (params.code?.trim()) query.set('code', params.code.trim());
+  if (params.user?.trim()) query.set('used_by_username', params.user.trim());
+  if (params.status) query.set('status', params.status);
+  if (params.mode) query.set('mode', params.mode);
+  return query;
+}
+
 async function submitFilters() {
   currentPage.value = 1;
   await reloadCodes();
+}
+
+async function setStatusFilter(status: 'unused' | 'used' | 'revoked') {
+  if (qStatus.value === status && currentPage.value === 1) return;
+  suppressFilterWatch = true;
+  qStatus.value = status;
+  currentPage.value = 1;
+  try {
+    await reloadCodes();
+  } finally {
+    suppressFilterWatch = false;
+  }
+}
+
+async function clearStatusFilter() {
+  if (qStatus.value === '' && currentPage.value === 1) return;
+  suppressFilterWatch = true;
+  qStatus.value = '';
+  currentPage.value = 1;
+  try {
+    await reloadCodes();
+  } finally {
+    suppressFilterWatch = false;
+  }
+}
+
+function scheduleFilterReload() {
+  if (filterTimer !== undefined) {
+    window.clearTimeout(filterTimer);
+  }
+  filterTimer = window.setTimeout(() => {
+    void submitFilters();
+  }, 220);
+}
+
+function toggleExportDay(day: number) {
+  const next = new Set(exportSelectedDays.value);
+  if (next.has(day)) next.delete(day);
+  else next.add(day);
+  exportSelectedDays.value = Array.from(next).sort((a, b) => a - b);
+}
+
+function onExportAddDaysToggle(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  exportAddDaysEnabled.value = checked;
+  if (checked) {
+    exportFixedDateEnabled.value = false;
+  }
+}
+
+function onExportFixedDateToggle(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked;
+  exportFixedDateEnabled.value = checked;
+  if (checked) {
+    exportAddDaysEnabled.value = false;
+  }
+}
+
+function removeExportDay(day: number) {
+  exportSelectedDays.value = exportSelectedDays.value.filter((item) => item !== day);
+}
+
+function toggleExportDate(date: string) {
+  const next = new Set(exportSelectedDates.value);
+  if (next.has(date)) next.delete(date);
+  else next.add(date);
+  exportSelectedDates.value = Array.from(next).sort();
+}
+
+function removeExportDate(date: string) {
+  exportSelectedDates.value = exportSelectedDates.value.filter((item) => item !== date);
+}
+
+function matchesExportStatus(item: Item) {
+  const statusOk =
+    (item.status === 'unused' && exportStatusFlags.unused) ||
+    (item.status === 'used' && exportStatusFlags.used) ||
+    (item.status === 'revoked' && exportStatusFlags.revoked);
+  if (!statusOk) return false;
+  return true;
+}
+
+function getExportStatusFilteredItems() {
+  return exportPool.value.filter(matchesExportStatus);
+}
+
+const availableExportDays = computed(() => {
+  const values = new Set<number>();
+  for (const item of getExportStatusFilteredItems()) {
+    if (item.mode !== 'add_days') continue;
+    if (Number.isFinite(item.days) && item.days > 0) {
+      values.add(item.days);
+    }
+  }
+  return [...values].sort((a, b) => a - b);
+});
+
+const availableExportDates = computed(() => {
+  const values = new Set<string>();
+  for (const item of getExportStatusFilteredItems()) {
+    if (item.mode !== 'fixed_expire_date') continue;
+    const fixedDate = item.fixedExpireDate || '';
+    if (fixedDate) {
+      values.add(fixedDate);
+    }
+  }
+  return [...values].sort();
+});
+
+function selectedExportStatuses() {
+  return ([
+    exportStatusFlags.unused ? 'unused' : null,
+    exportStatusFlags.used ? 'used' : null,
+    exportStatusFlags.revoked ? 'revoked' : null
+  ].filter(Boolean) as Array<'unused' | 'used' | 'revoked'>);
+}
+
+function buildExportRequestBody(options?: { includeRules?: boolean }) {
+  const body: {
+    statuses: Array<'unused' | 'used' | 'revoked'>;
+    addDaysEnabled: boolean;
+    fixedDateEnabled: boolean;
+    days?: number[];
+    fixedExpireDates?: string[];
+  } = {
+    statuses: selectedExportStatuses(),
+    addDaysEnabled: Boolean(options?.includeRules && exportAddDaysEnabled.value),
+    fixedDateEnabled: Boolean(options?.includeRules && exportFixedDateEnabled.value)
+  };
+
+  if (options?.includeRules) {
+    if (exportAddDaysEnabled.value && exportSelectedDays.value.length > 0) {
+      body.days = [...exportSelectedDays.value];
+    }
+    if (exportFixedDateEnabled.value && exportSelectedDates.value.length > 0) {
+      body.fixedExpireDates = [...exportSelectedDates.value];
+    }
+  }
+
+  return body;
+}
+
+async function loadExportPool() {
+  exportPoolLoading.value = true;
+  if (exportPoolTimer !== undefined) {
+    window.clearTimeout(exportPoolTimer);
+  }
+  exportPoolTimer = window.setTimeout(async () => {
+    try {
+      const latest = await api<ExportCodeResponse>('/api/admin/codes/export', {
+        method: 'POST',
+        body: JSON.stringify(buildExportRequestBody({ includeRules: false }))
+      });
+      exportPool.value = (latest.items || []).map(normalizeCodeItem);
+    } catch (e) {
+      error.value = `读取导出数据失败：${(e as Error).message}`;
+      exportPool.value = [];
+    } finally {
+      exportPoolLoading.value = false;
+      exportPoolTimer = undefined;
+    }
+  }, 120);
+}
+
+function pruneExportSelections() {
+  const daySet = new Set(availableExportDays.value);
+  const dateSet = new Set(availableExportDates.value);
+  exportSelectedDays.value = exportSelectedDays.value.filter((day) => daySet.has(day));
+  exportSelectedDates.value = exportSelectedDates.value.filter((date) => dateSet.has(date));
+}
+
+async function exportToClipboard() {
+  await exportCodes('clipboard');
+}
+
+async function exportToTxt() {
+  await exportCodes('txt');
+}
+
+async function exportCodes(method: 'clipboard' | 'txt') {
+  exportBusy.value = true;
+  try {
+    const latest = await api<ExportCodeResponse>('/api/admin/codes/export', {
+      method: 'POST',
+      body: JSON.stringify(buildExportRequestBody({ includeRules: true }))
+    });
+    const codes = (latest.items || []).map((item) => item.code);
+    if (codes.length === 0) {
+      showExportNotice('没有可导出的授权码', '当前筛选条件下没有匹配数据');
+      copyMsg.value = '没有匹配的授权码可导出';
+      return;
+    }
+    const text = codes.join('\n');
+    if (method === 'clipboard') {
+      const copied = await copyText(text);
+      copyMsg.value = copied ? `已导出 ${codes.length} 个授权码到剪贴板` : '导出失败，请手动复制';
+      if (copied) {
+        showExportSuccess(codes.length);
+      }
+      return;
+    }
+    downloadTxt(text, `activation-codes-${fmtExportStamp()}.txt`);
+    copyMsg.value = `已导出 ${codes.length} 个授权码为 TXT`;
+    showExportSuccess(codes.length);
+  } catch (e) {
+    error.value = `导出失败：${(e as Error).message}`;
+  } finally {
+    exportBusy.value = false;
+  }
+}
+
+function showExportSuccess(count: number) {
+  if (exportSuccessTimer !== undefined) {
+    window.clearTimeout(exportSuccessTimer);
+    exportSuccessTimer = undefined;
+  }
+  if (exportNoticeTimer !== undefined) {
+    window.clearTimeout(exportNoticeTimer);
+    exportNoticeTimer = undefined;
+  }
+  exportSuccessCount.value = count;
+  exportSuccessOpen.value = true;
+  if (exportAutoCloseEnabled.value) {
+    exportSuccessTimer = window.setTimeout(() => {
+      closeExportSuccess();
+    }, 1000);
+  }
+}
+
+function closeExportSuccess() {
+  if (exportSuccessTimer !== undefined) {
+    window.clearTimeout(exportSuccessTimer);
+    exportSuccessTimer = undefined;
+  }
+  closeExportDialog();
+}
+
+function showExportNotice(title: string, message: string) {
+  if (exportNoticeTimer !== undefined) {
+    window.clearTimeout(exportNoticeTimer);
+    exportNoticeTimer = undefined;
+  }
+  exportNoticeTitle.value = title;
+  exportNoticeMessage.value = message;
+  exportNoticeOpen.value = true;
+  exportNoticeTimer = window.setTimeout(() => {
+    exportNoticeOpen.value = false;
+    exportNoticeTimer = undefined;
+  }, 1000);
 }
 
 async function goPage(page: number) {
@@ -465,6 +907,25 @@ async function copyText(text: string) {
   return copied;
 }
 
+function downloadTxt(text: string, filename: string) {
+  const blob = new Blob([`\ufeff${text}`], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function fmtExportStamp() {
+  const now = new Date();
+  const pad = (v: number) => String(v).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
 function openRevoke(c: Item) {
   if (c.status === 'used' || c.status === 'revoked') return;
   selectedCode.value = c;
@@ -509,7 +970,66 @@ onMounted(async () => {
     error.value = `接口读取失败：${(e as Error).message}`;
     items.value = [];
   }
+  window.addEventListener('keydown', handleGlobalKeydown);
 });
+
+watch([qCode, qUser, qStatus], () => {
+  if (suppressFilterWatch) return;
+  scheduleFilterReload();
+});
+
+watch(
+  [
+    () => exportStatusFlags.unused,
+    () => exportStatusFlags.used,
+    () => exportStatusFlags.revoked
+  ],
+  () => {
+    if (exportOpen.value) {
+      void loadExportPool();
+    }
+  },
+  { immediate: true }
+);
+
+watch([availableExportDays, availableExportDates], () => {
+  pruneExportSelections();
+});
+
+onBeforeUnmount(() => {
+  if (filterTimer !== undefined) {
+    window.clearTimeout(filterTimer);
+  }
+  if (exportPoolTimer !== undefined) {
+    window.clearTimeout(exportPoolTimer);
+  }
+  if (exportSuccessTimer !== undefined) {
+    window.clearTimeout(exportSuccessTimer);
+  }
+  if (exportNoticeTimer !== undefined) {
+    window.clearTimeout(exportNoticeTimer);
+    exportNoticeTimer = undefined;
+  }
+  window.removeEventListener('keydown', handleGlobalKeydown);
+});
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return;
+  if (exportSuccessOpen.value) {
+    event.preventDefault();
+    closeExportSuccess();
+    return;
+  }
+  if (exportNoticeOpen.value) {
+    event.preventDefault();
+    exportNoticeOpen.value = false;
+    return;
+  }
+  if (exportOpen.value) {
+    event.preventDefault();
+    closeExportDialog();
+  }
+}
 </script>
 
 <style scoped>
@@ -526,6 +1046,25 @@ h1 { margin: 0; color: #0f172a; }
 .filters button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
 .filters button:disabled { cursor: not-allowed; opacity: 0.65; box-shadow: none; }
 .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff; font-weight: 600; }
+.export-btn {
+  border-color: #1d4ed8 !important;
+  background: #2563eb !important;
+  color: #fff !important;
+  font-weight: 700;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease, border-color 0.16s ease, filter 0.16s ease;
+}
+.export-btn:hover {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  color: #fff !important;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+  filter: brightness(1.02);
+  transform: translateY(-1px);
+}
+.export-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.14);
+}
 
 .table-wrap { overflow-x: auto; }
 .table { width: 100%; min-width: 1120px; border-collapse: collapse; }
@@ -545,8 +1084,14 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .copy-code:hover { border-style: solid; border-color: #2563eb; background: #dbeafe; color: #1e40af; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
 .copy-code:active { transform: translateY(1px) scale(0.98); background: #bfdbfe; }
 .copy-msg { margin: 8px 0 0; color: #0f766e; font-size: 12px; }
+.table-note { margin: 0 0 8px; color: #64748b; font-size: 12px; }
 
-.logs-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid #e2e8f0; background: #f8fafc; color: #475569; font-size: 13px; margin-top: 10px; border-radius: 0 0 12px 12px; }
+.table-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 12px 14px; border-top: 1px solid #e2e8f0; background: #f8fafc; color: #475569; font-size: 13px; border-radius: 0 0 12px 12px; }
+.summary-line { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; color: #334155; }
+.summary-btn { border: 1px solid transparent; background: transparent; color: inherit; border-radius: 999px; padding: 2px 8px; font: inherit; font-weight: 600; cursor: pointer; transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease; }
+.summary-btn:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.summary-btn.active { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.summary-line > span { color: #94a3b8; }
 .pager { display: inline-flex; align-items: center; gap: 10px; }
 .pager strong { color: #0f172a; min-width: 64px; text-align: center; }
 .pager button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-weight: 600; }
@@ -567,6 +1112,7 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .actions button:disabled:hover { border-color: #e5e7eb; background: #f3f4f6; color: #9ca3af; box-shadow: none; }
 
 .modal-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 60; }
+.notice-mask { background: rgba(15, 23, 42, 0.22); z-index: 70; }
 .modal { width: 58%; max-width: 540px; min-width: 320px; background: #fff; border: 1px solid #dbe3ef; border-radius: 12px; padding: 0; overflow: hidden; }
 .modal h3 { margin: 0; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e2e8f0; background: #f5f7ff; }
@@ -574,7 +1120,69 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .modal-form { display: grid; gap: 10px; padding: 14px 16px; }
 .modal-form label { display: grid; gap: 6px; font-size: 13px; color: #334155; }
 .modal-form input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
+.modal-form select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; }
 .modal-form textarea { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.checkbox-line { display: flex !important; align-items: center; gap: 8px !important; }
+.checkbox-line input { width: auto; padding: 0; }
+.status-grid { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.export-section { display: grid; gap: 10px; padding: 12px 0; border-top: 1px solid #e2e8f0; }
+.export-section:first-of-type { border-top: 0; padding-top: 0; }
+.section-title { color: #0f172a; font-size: 14px; font-weight: 700; }
+.subsection-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.subsection-title { color: #334155; font-size: 13px; font-weight: 700; }
+.subsection-count { color: #64748b; font-size: 12px; }
+.nested-panel {
+  display: grid;
+  gap: 10px;
+  margin-left: 20px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+.choice-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.mini-checkbox {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px !important;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.mini-checkbox input { width: auto; padding: 0; }
+.inline-add { display: flex; flex-wrap: wrap; gap: 8px; }
+.inline-add input { flex: 1 1 200px; }
+.inline-add button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #334155;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  min-width: 88px;
+  font-weight: 600;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease;
+}
+.inline-add button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.inline-add button:active { transform: translateY(1px) scale(0.98); }
+.tag-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-chip {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease, transform 0.08s ease;
+}
+.tag-chip:hover { border-color: #93c5fd; background: #dbeafe; color: #1e40af; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12); }
+.tag-chip:active { transform: translateY(1px) scale(0.98); }
+.tag-chip span { font-weight: 700; }
+.export-a11y { margin-top: 2px; }
 .mode-fieldset { border: 1px solid #dbe3ef; border-radius: 10px; display: grid; gap: 8px; margin: 0; padding: 10px 12px; }
 .mode-fieldset legend { color: #334155; font-size: 13px; font-weight: 700; padding: 0 4px; }
 .radio-line { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 8px !important; }
@@ -592,9 +1200,30 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .modal-actions button:active { transform: translateY(1px) scale(0.98); }
 .modal-actions .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff !important; }
 .modal-actions .add-btn:hover { background: #1d4ed8 !important; color: #fff !important; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2); }
+.modal-actions .export-btn {
+  border-color: #1d4ed8 !important;
+  background: #2563eb !important;
+  color: #fff !important;
+}
+.modal-actions .export-btn:hover {
+  background: #1d4ed8 !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
 .modal-actions .warn { border-color: #fcd34d; color: #92400e; background: #fffbeb; }
 .modal-actions .danger { border-color: #fecaca; color: #b91c1c; background: #fef2f2; }
 .modal-content { padding: 14px 16px; }
+.export-success-modal { width: 42%; max-width: 420px; }
+.notice-modal {
+  width: 34%;
+  max-width: 320px;
+  min-width: 260px;
+  border-color: #dbeafe;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.18);
+}
+.notice-modal .modal-content { text-align: center; padding: 18px 16px; }
+.notice-modal h3 { color: #0f172a; font-size: 18px; }
+.notice-modal .sub { margin: 8px 0 0; color: #64748b; font-size: 13px; line-height: 1.45; }
 .success-modal .sub,
 .confirm-modal .sub {
   margin: 8px 0 0;
@@ -617,7 +1246,7 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 @media (max-width: 640px) {
   .filters { grid-template-columns: 1fr; }
   .filters button { min-height: 40px; }
-  .logs-pagination { align-items: stretch; flex-direction: column; }
+  .table-footer { align-items: stretch; flex-direction: column; }
   .pager { justify-content: space-between; }
   .modal { width: calc(100vw - 24px); }
   .modal-actions { flex-wrap: wrap; }

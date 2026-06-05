@@ -31,7 +31,7 @@ const userAuthSchema = z.object({
 });
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(8).max(128),
+  password: z.string().min(1).max(128),
   turnstileToken: z.string().optional()
 });
 const changePasswordSchema = z.object({
@@ -165,13 +165,13 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "请输入正确的用户名和密码" });
+    return res.json({ ok: false, message: "请输入正确的用户名和密码" });
   }
 
   const { username, password, turnstileToken } = parsed.data;
   const normalizedUsername = username.trim();
   if (!normalizedUsername) {
-    return res.status(400).json({ message: "请输入正确的用户名和密码" });
+    return res.json({ ok: false, message: "请输入正确的用户名和密码" });
   }
   const ip = clientIp(req.ip);
   const ua = userAgent(req.get("user-agent"));
@@ -200,7 +200,7 @@ router.post("/login", async (req, res) => {
       success: false,
       message: turnstile.message || "turnstile failed"
     });
-    return res.status(400).json({ message: turnstile.message });
+    return res.json({ ok: false, message: turnstile.message });
   }
 
   if (admin) {
@@ -216,7 +216,7 @@ router.post("/login", async (req, res) => {
         success: false,
         message: "用户名或密码错误，或账号已禁用"
       });
-      return res.status(401).json({ message: "用户名或密码错误，或账号已禁用" });
+      return res.json({ ok: false, message: "用户名或密码错误，或账号已禁用" });
     }
 
     await clearLoginFail(username, ip);
@@ -253,7 +253,7 @@ router.post("/login", async (req, res) => {
       success: false,
       message: "用户名或密码错误，或账号已禁用"
     });
-    return res.status(401).json({ message: "用户名或密码错误，或账号已禁用" });
+    return res.json({ ok: false, message: "用户名或密码错误，或账号已禁用" });
   }
 
   await clearLoginFail(username, ip);
