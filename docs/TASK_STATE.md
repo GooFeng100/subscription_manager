@@ -6,6 +6,49 @@
 
 ## Round Goal
 
+修复帮助页中 Clash Verge 云端图片无法加载的问题，统一图片路径为可部署访问的静态资源路径。
+
+## Project Current Status
+
+- `[frontend/src/content/help/clash-verge.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-verge.md)` 中的三张图片已从 `/public/help-assets/...` 修正为 `/help-assets/...`。
+- 这会让云端部署与本地开发都走同一套静态资源路径，避免图片 404。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/content/help/clash-verge.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `grep -RIn "/public/help-assets" /vol1/1000/docker/subscription_manager/frontend/src /vol1/1000/docker/subscription_manager/frontend/public --exclude-dir=node_modules --exclude-dir=dist`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-verge.md`
+
+## Docker/Container Status
+
+- 本轮未改动容器。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 已确认问题路径仅存在于 `clash-verge.md`，没有其他 `/public/help-assets` 引用残留。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 重新构建前端并刷新 `/help`，确认云端图片恢复显示。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
 验证后打 tag 并推送仓库到 GitHub。
 
 ## Project Current Status
