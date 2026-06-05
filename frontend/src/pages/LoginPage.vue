@@ -32,6 +32,9 @@
       <p class="msg" :class="{ ok: msgType === 'ok', err: msgType === 'err' }">{{ msg }}</p>
       <hr class="divider" />
       <p class="switch">没有账号？<RouterLink to="/register">立即注册</RouterLink></p>
+      <div class="actions">
+        <RouterLink class="help-button" to="/help">使用帮助</RouterLink>
+      </div>
     </form>
   </AuthLayout>
 </template>
@@ -153,6 +156,40 @@ onMounted(() => {
   margin: 2px 0 0;
 }
 
+.switch {
+  margin: 0;
+  color: #111827;
+  font-size: 13px;
+  text-align: center;
+}
+
+.switch a {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid #1d4ed8;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
 .msg {
   margin: 0;
   min-height: 18px;
@@ -168,19 +205,6 @@ onMounted(() => {
   color: #b91c1c;
 }
 
-.switch {
-  margin: 0;
-  color: #111827;
-  font-size: 13px;
-  text-align: center;
-}
-
-.switch a {
-  color: #1d4ed8;
-  text-decoration: none;
-  font-weight: 600;
-}
-
 @media (max-width: 640px) {
   .msg,
   .switch {
@@ -189,6 +213,11 @@ onMounted(() => {
 
   .divider {
     margin-top: 4px;
+  }
+
+  .help-button {
+    width: 100%;
+    font-size: 15px;
   }
 }
 </style>

@@ -9,7 +9,7 @@ import { clearLoginFail, isLoginLocked, recordLoginFail } from "../services/logi
 import { verifyTurnstile } from "../services/turnstile.js";
 import { checkRegisterIpLimit, recordRegisterIp } from "../services/register-guard.js";
 import { writeAuthLog } from "../services/auth-log.js";
-import { requireAdmin, requireAuth } from "../middleware/require-role.js";
+import { requireAdmin, requireAuth, requireUser } from "../middleware/require-role.js";
 import { authLogsCol } from "../lib/db.js";
 import type { UserDoc } from "../lib/db.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
@@ -49,6 +49,22 @@ function clientIp(ip?: string) {
 
 function userAgent(ua?: string) {
   return ua || "unknown";
+}
+
+async function buildUserSessionView(user: UserDoc & { _id: ObjectId }) {
+  const synced = await syncUserLifecycle(user);
+  const subVersion = await getCurrentSubVersion();
+
+  return {
+    userType: "user" as const,
+    username: synced.username,
+    dashboard: "/dashboard",
+    status: synced.status,
+    expire_at: synced.expire_at,
+    disable_after: synced.disable_after,
+    sub_token: synced.sub_token,
+    sub_version: subVersion.version
+  };
 }
 
 function isReservedAdminUsername(username: string) {
@@ -377,19 +393,7 @@ router.get("/me", requireAuth, async (req, res) => {
   if (!user) {
     return res.status(401).json({ message: "Unauthorized" });
   }
-  const synced = await syncUserLifecycle(user as UserDoc & { _id: ObjectId });
-  const subVersion = await getCurrentSubVersion();
-
-  return res.json({
-    userType: "user",
-    username: synced.username,
-    dashboard: "/dashboard",
-    status: synced.status,
-    expire_at: synced.expire_at,
-    disable_after: synced.disable_after,
-    sub_token: synced.sub_token,
-    sub_version: subVersion.version
-  });
+  return res.json(await buildUserSessionView(user as UserDoc & { _id: ObjectId }));
 });
 
 router.get("/session", async (req, res) => {
@@ -411,20 +415,53 @@ router.get("/session", async (req, res) => {
     return res.json({ authenticated: false });
   }
 
-  const synced = await syncUserLifecycle(user as UserDoc & { _id: ObjectId });
-  const subVersion = await getCurrentSubVersion();
-
   return res.json({
     authenticated: true,
-    userType: "user",
-    username: synced.username,
-    dashboard: "/dashboard",
-    status: synced.status,
-    expire_at: synced.expire_at,
-    disable_after: synced.disable_after,
-    sub_token: synced.sub_token,
-    sub_version: subVersion.version
+    ...(await buildUserSessionView(user as UserDoc & { _id: ObjectId }))
   });
+});
+
+router.post("/user/reset-sub-token", requireUser, async (req, res) => {
+  const sessionUserId = req.session.userId;
+  if (!sessionUserId || !ObjectId.isValid(sessionUserId)) {
+    return res.status(400).json({ message: "Invalid user id" });
+  }
+
+  const userId = new ObjectId(sessionUserId);
+  const user = await usersCol().findOne({ _id: userId });
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const ip = clientIp(req.ip);
+  const ua = userAgent(req.get("user-agent"));
+
+  const now = new Date();
+  const updated = await usersCol().findOneAndUpdate(
+    { _id: userId },
+    {
+      $set: {
+        sub_token: generateSubToken(),
+        updated_at: now
+      }
+    },
+    { returnDocument: "after" }
+  );
+  if (!updated) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  const refreshed = await buildUserSessionView(updated as UserDoc & { _id: ObjectId });
+  await writeAuthLog({
+    userId: String(userId),
+    username: refreshed.username,
+    ip,
+    userAgent: ua,
+    action: "user_reset_token",
+    success: true,
+    message: "subscription token reset"
+  });
+  return res.json({ item: refreshed });
 });
 
 const authLogsQuerySchema = z.object({

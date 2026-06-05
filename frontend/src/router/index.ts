@@ -34,7 +34,7 @@ export const router = createRouter({
   ]
 });
 
-const publicPaths = new Set(["/login", "/register"]);
+const publicPaths = new Set(["/login", "/register", "/help"]);
 type Me = {
   userType?: "admin" | "user";
   dashboard?: string;

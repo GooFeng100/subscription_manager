@@ -2,6 +2,1018 @@
 
 ## Date
 
+2026-06-05
+
+## Round Goal
+
+修复用户端重置 Token 对过期账号返回 `400` 的问题，并完成 expired 账号联动复测。
+
+## Project Current Status
+
+- `[backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)` 已移除用户自助重置 token 的状态限制，行为与管理端重置保持一致。
+- 过期账号现在也可以通过用户端弹窗触发重置 Token。
+- 已重新构建并重启 `app` 容器，使修复进入运行环境。
+- 已用真实 expired 账号复测 `POST /api/auth/user/reset-sub-token`，接口返回 `200`。
+- 旧订阅链接已验证返回 `404`，新订阅链接返回 `200`。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '420,480p' /vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts`
+- `sed -n '440,480p' /vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts`
+- `npm run typecheck` in `backend/`
+- `npm run build` in `backend/`
+- `docker compose -f compose.yaml up -d --build app`
+- `curl -sS http://127.0.0.1:8084/health`
+- `docker exec subscription-manager-mongodb mongosh --quiet --eval 'db.system_state.findOne({key:"runtime_settings"})' subscription_manager`
+- `curl` login / create user / reset token / subscription checks for both `grace` and `expired` accounts
+
+## Docker/Container Status
+
+- `subscription-manager-app` 已重建并重启。
+- `subscription-manager-caddy` 未额外改动。
+- MongoDB 和 Redis 运行正常。
+
+## API/Interface Status
+
+- `POST /api/auth/user/reset-sub-token` 现在对过期账号可正常返回 `200`。
+- `GET /api/auth/session` 会同步返回新 token。
+- `/sub/:token` 旧 token 失效，新 token 生效。
+
+## Validation Result
+
+- backend typecheck: pass
+- backend build: pass
+- expired account API test: pass
+
+## Notes / Blockers
+
+- 验收中临时关闭过 Turnstile 以完成管理员登录和测试用户创建，之后已恢复为原值。
+
+## Next Step
+
+- 如果你要，我可以继续把这个行为补进帮助文档或用户提示文案里，让用户知道“即使账号过期，也可以通过重置 token 保护旧链接安全”。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+删除帮助目录中的「系统代理与代理模式」页面及其入口。
+
+## Project Current Status
+
+- `[frontend/src/content/help/proxy-mode.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/proxy-mode.md)` 已删除。
+- `[frontend/src/content/help/index.ts](/vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts)` 中对应的 import 和目录项已移除。
+- 帮助页左侧目录不再显示「系统代理与代理模式」。
+- 本轮未构建，继续使用热更新查看。
+
+## File Changes In This Round
+
+- Deleted: `frontend/src/content/help/proxy-mode.md`
+- Updated: `frontend/src/content/help/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `grep -RIn "系统代理与代理模式\\|proxy-mode" /vol1/1000/docker/subscription_manager/frontend/src /vol1/1000/docker/subscription_manager/frontend/public /vol1/1000/docker/subscription_manager/docs | head -n 200`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help` 确认目录中已移除该页。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+新增「Surge 使用说明」帮助页面，并接入帮助目录，保持热更新查看。
+
+## Project Current Status
+
+- 已新增 `[frontend/src/content/help/surge.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/surge.md)`。
+- 已将 Surge 页面接入 `[frontend/src/content/help/index.ts](/vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts)`。
+- 左侧帮助目录会显示「Surge 使用说明」。
+- 本轮未构建，继续使用热更新查看效果。
+
+## File Changes In This Round
+
+- Added: `frontend/src/content/help/surge.md`
+- Updated: `frontend/src/content/help/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clients.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-verge.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help`，在目录里选择「Surge 使用说明」查看。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+移除内联图标的外层圆角/边框效果，让 `:icon[...]()` 生成的图标只显示图片本体。
+
+## Project Current Status
+
+- `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)` 中的 `.md-inline-icon` 已显式去掉背景、圆角、阴影和边框。
+- 内联图标现在应只显示图片本身，不再带外层装饰框。
+- 本轮仍未构建，继续使用热更新查看。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- 无新增命令
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新帮助页检查内联图标是否已经只剩图标本体。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+实现一个通用的内联图标语法，支持在帮助文档里用 `:icon[文字](/path.png)` 插入图片，而不必写 HTML。
+
+## Project Current Status
+
+- `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)` 已支持 `:icon[...]()` 语法。
+- 该语法会被渲染成内联图片，可用于标题、段落、提示框正文等位置。
+- 本轮未构建，仍使用热更新查看。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以在文档里直接写 `:icon[Windows](/help-assets/windows.png)` 这类语法试试。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+对“用户端重置 Token”模块做前后端联动验收，确认重置接口、用户会话同步和订阅链接失效/恢复行为都正常。
+
+## Project Current Status
+
+- 已重新构建并重启 `[compose.yaml](/vol1/1000/docker/subscription_manager/compose.yaml)` 中的 `app` 和 `caddy` 容器，让当前工作区代码真正进入运行环境。
+- 已通过真实 API 路径验证 `POST /api/auth/user/reset-sub-token` 可用。
+- 已验证用户重置后 `GET /api/auth/session` 立即返回新 token。
+- 已验证旧订阅链接返回 `404`，新订阅链接返回 `200`。
+- 验收期间临时将 `system_state.runtime_settings` 的 Turnstile 开关关闭以完成登录测试，完成后已恢复为原值。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `curl -sS -I http://127.0.0.1:8084/health`
+- `curl -sS http://127.0.0.1:8084/health`
+- `docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'`
+- `grep -n "^ADMIN_USERNAME\\|^ADMIN_PASSWORD\\|^SESSION_SECRET\\|^APP_BASE_URL" /vol1/1000/docker/subscription_manager/.env`
+- `docker exec subscription-manager-mongodb mongosh --quiet --eval 'db.system_state.findOne({key:"runtime_settings"})' subscription_manager`
+- `docker compose -f compose.yaml up -d --build app caddy`
+- `curl -sS -c ... -b ... -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123456"}' http://127.0.0.1:8084/api/auth/login`
+- `curl -sS -b ... http://127.0.0.1:8084/api/auth/session`
+- `curl -sS -b ... -H 'Content-Type: application/json' -d '{...}' http://127.0.0.1:8084/api/admin/users`
+- `curl -sS -b ... -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8084/api/auth/user/reset-sub-token`
+- `curl -sS -o /tmp/codex_old_sub_body.txt -w '%{http_code}' http://127.0.0.1:8084/sub/<old-token>?target=clash`
+- `curl -sS -o /tmp/codex_new_sub_body.txt -w '%{http_code}' http://127.0.0.1:8084/sub/<new-token>?target=clash`
+- `docker exec subscription-manager-mongodb mongosh --quiet --eval 'db.system_state.updateOne(...)' subscription_manager`
+
+## Docker/Container Status
+
+- `subscription-manager-app` 已用当前工作区代码重建并重启。
+- `subscription-manager-caddy` 已同步重建并重启。
+- MongoDB 和 Redis 维持运行。
+
+## API/Interface Status
+
+- `POST /api/auth/user/reset-sub-token` 可正常调用。
+- `GET /api/auth/session` 在重置前后会同步返回 token。
+- `/sub/:token` 对旧 token 返回 `404`，对新 token 返回 `200`。
+
+## Validation Result
+
+- 真实链路验收通过。
+
+## Notes / Blockers
+
+- 验收时需要临时关闭 Turnstile 才能登录管理端创建测试用户，已在结束后恢复。
+
+## Next Step
+
+- 如果要继续做 UI 级别验收，可以直接在浏览器里打开用户控制台，点“重置Token”观察弹窗和刷新后的链接文本。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+用户端控制台新增“重置 Token”按钮，用户可自助轮换订阅 token，并与后端会话返回值同步更新。
+
+## Current Follow-Up
+
+将用户端重置 token 的确认方式从浏览器原生提示改为页面内弹窗，保持与项目现有弹窗交互风格一致。
+
+## Project Current Status
+
+- 已新增用户自助重置接口 `[backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)`，路径为 `POST /api/auth/user/reset-sub-token`。
+- `[backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)` 里的 `/api/auth/me` 和 `/api/auth/session` 现在复用同一份用户会话响应构建逻辑，确保重置后读取到的是最新 token。
+- `[frontend/src/pages/DashboardPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/DashboardPage.vue)` 已加入“重置Token”按钮、确认提示和成功后的页面状态同步。
+- 确认提示已改为页面内弹窗，不再使用浏览器原生 `confirm`。
+- 按钮不依赖当前是否已有 token，直接提交给后端判断是否可重置，更贴近管理端的重置行为。
+- 用户重置时会立即失效旧链接，并返回新的订阅 token，便于用户在泄露后快速止损。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/subscription_manager_dev_task.md`
+- `grep -RIn "reset\\|token\\|重置" /vol1/1000/docker/subscription_manager/backend /vol1/1000/docker/subscription_manager/frontend --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git`
+- `sed -n '400,485p' /vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/DashboardPage.vue`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/backend/src/middleware/require-role.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/lib/auth-cache.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/router/index.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/backend/src/services/auth-log.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/lib/api.ts`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/AdminUsersPage.vue`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/backend/src/services/user-lifecycle.ts`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/backend/src/lib/db.ts`
+- `sed -n '1,200p' /vol1/1000/docker/subscription_manager/frontend/src/components/user/UserMobileLayout.vue`
+- `npm run typecheck` in `backend/`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run typecheck` in `frontend/` after the final dashboard runtime-safety tweak
+- `npm run build` in `frontend/` after the final dashboard runtime-safety tweak
+- `npm run typecheck` in `frontend/` after switching reset confirmation to an in-page modal
+- `npm run build` in `frontend/` after switching reset confirmation to an in-page modal
+
+## Docker/Container Status
+
+- 本轮未改动 Docker Compose 配置。
+- 未执行容器重建或重启。
+- 现有 NAS 容器状态保持不变。
+
+## API/Interface Status
+
+- 新增 `POST /api/auth/user/reset-sub-token`，用于当前登录用户自助重置订阅 token。
+- `GET /api/auth/me` 与 `GET /api/auth/session` 已统一为同一份用户会话响应构建结果，确保 token 同步。
+- 前端用户控制台已可直接显示新 token 和新的订阅链接。
+- 重置确认由页面内弹窗承接，不再依赖浏览器原生提示框。
+
+## Validation Result
+
+- `backend` typecheck 通过。
+- `frontend` typecheck 通过。
+- `backend` build 通过。
+- `frontend` build 通过。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 在浏览器里打开用户控制台，点击“重置Token”做一次端到端手工确认，检查旧订阅链接是否立即失效。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+新增「Clash Verge 使用说明」帮助文档，内容参考 Clash Verge Rev 官方快速入门页并接入帮助目录。
+
+## Project Current Status
+
+- 已新增 `[frontend/src/content/help/clash-verge.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-verge.md)`。
+- 已将新文档接入 `[frontend/src/content/help/index.ts](/vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts)`。
+- 帮助页左侧目录会显示「Clash Verge 使用说明」。
+- 本轮未构建，继续使用热更新查看效果。
+
+## File Changes In This Round
+
+- Added: `frontend/src/content/help/clash-verge.md`
+- Updated: `frontend/src/content/help/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `open("https://www.clashverge.dev/guide/quickstart.html")`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help`，选择左侧新加入的「Clash Verge 使用说明」查看内容。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+补充 `:::tip` 和 `:::warning` 两个可复用模板，并为三种提示框配置不同颜色。
+
+## Project Current Status
+
+- `HelpPage.vue` 已支持 `info`、`tip`、`warning` 三种 callout。
+- `register-login.md` 已补上 `tip` 和 `warning` 示例。
+- 三种提示框已经有独立配色，便于文档中区分信息层级。
+- 本轮仍未构建，继续使用热更新查看效果。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 在 `http://192.168.10.3:5173/help` 里检查三种提示框的颜色表现。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+为帮助文档增加可复用的 `:::info ... :::` 模板语法，并让「注册与登录」示例改用该语法。
+
+## Project Current Status
+
+- `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)` 已加入 `:::info` 提示卡解析逻辑。
+- `[frontend/src/content/help/register-login.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md)` 已改为 `:::info` 语法示例。
+- 后续可以在任意帮助文档中直接写 `:::info` 来生成同款提示框。
+- 本轮不构建，继续使用热更新查看效果。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help` 检查 `:::info` 的渲染效果。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+把「注册与登录」文档改成更像示例图的独立信息卡样式，避免只显示普通引用块效果。
+
+## Project Current Status
+
+- `[frontend/src/content/help/register-login.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md)` 已改为自定义 `callout` HTML 结构。
+- `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)` 已补充 `callout` 样式，支持标题栏 + 正文内容。
+- 仍然只通过前端热更新查看效果，未构建。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+- `grep -n "blockquote\\|callout" -n /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help` 查看「注册与登录」中的注册说明卡片。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+将「注册与登录」文档里的规则说明渲染成提示框样式，方便在热更新模式下直接观察效果。
+
+## Project Current Status
+
+- `[frontend/src/content/help/register-login.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md)` 中的注册规则已改为引用块。
+- 当前帮助页会把 `blockquote` 渲染为浅色提示框样式。
+- 本轮未构建，依赖热更新即时预览。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help`，检查「注册与登录」段落的提示框效果。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+补全被删掉的帮助文档标题，恢复各篇文章的 `h1`，但不做构建，只依赖热更新即时查看。
+
+## Project Current Status
+
+- 已恢复 `overview.md`、`register-login.md`、`redeem-code.md`、`subscription-link.md` 的文章标题。
+- 其余帮助文档标题保持不变。
+- Vite 热更新服务仍在运行，可直接刷新查看效果。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/content/help/overview.md`
+- Updated: `frontend/src/content/help/register-login.md`
+- Updated: `frontend/src/content/help/redeem-code.md`
+- Updated: `frontend/src/content/help/subscription-link.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/overview.md`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/register-login.md`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/redeem-code.md`
+- `sed -n '1,120p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/subscription-link.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 通过 `sed` 复核，四篇帮助文档首行标题已恢复。
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help` 即可看到恢复后的标题。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+去掉帮助页顶部双标题和“使用帮助”小字，让正文标题直接作为页面主标题展示，并仅通过前端热更新查看效果。
+
+## Project Current Status
+
+- 已调整 `[frontend/src/pages/HelpPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue)`。
+- 帮助页顶部现在只保留返回登录按钮，正文 `h1` 直接作为进入页面后的标题。
+- 本轮未执行前后端构建，也未执行 NAS 发布，仅依赖热更新查看效果。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-party.md`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 本轮未执行构建验证。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help` 即可检查新布局和单标题效果。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+打开 NAS 前端热更新服务，方便修改帮助文档并立即观察效果。
+
+## Project Current Status
+
+- 前端 Vite 开发服务已在 NAS 上启动，支持热更新。
+- 开发服务地址：`http://192.168.10.3:5173`
+- 已配置开发代理，将 `/api`、`/sub`、`/health`、`/config` 转发到现有 NAS 站点，便于在开发模式下继续使用登录和配置接口。
+
+## File Changes In This Round
+
+- Updated: `frontend/vite.config.ts`
+- Updated: `frontend/package.json`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/package.json`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/vite.config.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/lib/public-config.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/lib/api.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/lib/auth-request.ts`
+- `npm run dev:nas`
+- `curl -I http://127.0.0.1:5173/help`
+- `curl -s http://127.0.0.1:5173/config`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 热更新由 NAS 本机的 Vite 开发服务提供，不影响当前 `8084` 生产站点。
+
+## API/Interface Status
+
+- 开发服务下的 `/help` 已可直接打开。
+- 开发服务通过代理可访问 `/config`，并继续使用现有 NAS 站点接口。
+
+## Validation Result
+
+- `http://192.168.10.3:5173/help` 返回 `200 OK`
+- `http://192.168.10.3:5173/config` 代理可用
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你现在可以修改 `frontend/src/content/help/*.md`，然后刷新 `http://192.168.10.3:5173/help` 观察效果。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+调整登录页按钮顺序，并将 `/help` 改为白底左侧导航、右侧正文的文档站风格。
+
+## Project Current Status
+
+- 登录页“使用帮助”按钮已移到“立即注册”下方。
+- `/help` 已改为白色背景、左侧目录、右侧正文的布局，视觉风格更接近文档站。
+- 最新前端构建已重新发布到 NAS 站点。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/LoginPage.vue`
+- `sed -n '1,320p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+- `npm run build --prefix frontend`
+- `./scripts/nas-release.sh`
+
+## Docker/Container Status
+
+- `subscription-manager-caddy` 已重建并重启。
+- `subscription-manager-app`、`subscription-manager-mongodb`、`subscription-manager-redis`、`subscription_manager_subconverter` 运行正常。
+
+## API/Interface Status
+
+- `/login` 页面已包含新的帮助按钮位置。
+- `/help` 公开访问与路由守卫逻辑未变。
+
+## Validation Result
+
+- `npm run build --prefix frontend` 通过。
+- `./scripts/nas-release.sh` 通过。
+- `http://127.0.0.1:8084/health` 返回 `200 OK`
+- `http://127.0.0.1:8084/config` 返回 `200 OK`
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接打开 `http://192.168.10.3:8084/login` 和 `/help` 检查新的按钮位置与白底布局。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+修复线上 NAS 站点帮助页入口缺失与 `/help` 错误跳转的问题，并完成一次实际发布验证。
+
+## Project Current Status
+
+- 已执行 `./scripts/nas-release.sh`，最新前端构建和容器镜像已重新发布到 `192.168.10.3:8084`。
+- `/login` 页面新增的“使用帮助”按钮已随最新前端构建一并发布。
+- `/help` 公开路由白名单已随最新构建生效，路由守卫代码中未发现继续重定向到 `/admin/users` 的逻辑。
+- 本轮发布后，Caddy 与 app 容器均已重启，健康检查正常。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `grep -RIn "help\\|admin/users\\|publicPaths\\|beforeEach" /vol1/1000/docker/subscription_manager/frontend/src /vol1/1000/docker/subscription_manager/backend | head -n 200`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/router/index.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/pages/LoginPage.vue`
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/caddy/Caddyfile`
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/nginx.conf`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/compose.yaml`
+- `./scripts/nas-release.sh`
+
+## Docker/Container Status
+
+- `subscription-manager-caddy` 已按最新构建重建并重启。
+- `subscription-manager-app`、`subscription-manager-mongodb`、`subscription-manager-redis`、`subscription_manager_subconverter` 均运行正常。
+
+## API/Interface Status
+
+- `http://127.0.0.1:8084/health` 返回 `200 OK`
+- `http://127.0.0.1:8084/config` 返回 `200 OK`
+- 前端公开路由与登录页入口已同步最新发布。
+
+## Validation Result
+
+- NAS 本地发布脚本执行成功。
+- 健康检查通过。
+- 前端构建在发布过程中再次通过。
+
+## Notes / Blockers
+
+- 如果你浏览器仍看到旧页面，优先做一次硬刷新或清缓存，这通常意味着本地缓存还在使用旧 JS。
+
+## Next Step
+
+- 你可以直接访问 `http://192.168.10.3:8084/login` 和 `http://192.168.10.3:8084/help` 再次确认。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+重新构建前端项目，刷新最新 `dist` 产物，便于检查帮助页效果。
+
+## Project Current Status
+
+- 前端帮助中心相关改动已保留。
+- 已重新执行前端构建，最新静态产物已刷新。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `npm run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker/compose。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- `npm run build --prefix frontend` 通过。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 你可以直接打开最新构建后的页面检查 `/help` 效果。
+
+## Date
+
+2026-06-05
+
+## Round Goal
+
+为项目新增公开帮助中心 `/help`，同步压缩包内的 Markdown 文档和图片资源，并保持未登录访问 `/admin/*` 与 `/dashboard` 的鉴权行为不变。
+
+## Project Current Status
+
+- 已将 `subscription_help_docs.zip` 中的帮助文档与图片素材落到项目内。
+- `/help` 已接入公开路由，未登录访问不会触发登录跳转。
+- 登录页 `/login` 已增加“使用帮助”入口，点击可直接进入 `/help`。
+- 帮助页已实现左侧目录、右侧正文、返回登录按钮和正文滚动的文档站布局。
+- `frontend` 已完成构建验证。
+
+## File Changes In This Round
+
+- Added: `frontend/public/help-assets/01-login.png`
+- Added: `frontend/public/help-assets/02-register.png`
+- Added: `frontend/public/help-assets/03-dashboard-inactive.png`
+- Added: `frontend/public/help-assets/04-redeem-entry.png`
+- Added: `frontend/public/help-assets/05-redeem-code.png`
+- Added: `frontend/public/help-assets/06-dashboard-active.png`
+- Added: `frontend/public/help-assets/07-copy-subscription.png`
+- Added: `frontend/public/help-assets/08-clash-party-import.png`
+- Added: `frontend/public/help-assets/09-clash-party-imported.png`
+- Added: `frontend/public/help-assets/10-clash-party-refresh.png`
+- Added: `frontend/public/help-assets/11-clash-party-selected-profile.png`
+- Added: `frontend/public/help-assets/12-proxy-group-select.png`
+- Added: `frontend/public/help-assets/13-proxy-groups.png`
+- Added: `frontend/public/help-assets/14-node-list.png`
+- Added: `frontend/public/help-assets/15-enable-system-proxy.png`
+- Added: `frontend/public/help-assets/16-rule-global-routing.png`
+- Added: `frontend/public/help-assets/17-google-rule-example.png`
+- Added: `frontend/public/help-assets/18-rule-global-switch.png`
+- Added: `frontend/public/help-assets/19-global-mode-example.png`
+- Added: `frontend/src/content/help/index.ts`
+- Added: `frontend/src/content/help/overview.md`
+- Added: `frontend/src/content/help/register-login.md`
+- Added: `frontend/src/content/help/redeem-code.md`
+- Added: `frontend/src/content/help/subscription-link.md`
+- Added: `frontend/src/content/help/clash-party.md`
+- Added: `frontend/src/content/help/proxy-mode.md`
+- Added: `frontend/src/content/help/clients.md`
+- Added: `frontend/src/content/help/faq.md`
+- Added: `frontend/src/content/help/contact.md`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/router/index.ts`
+- Updated: `frontend/package.json`
+- Updated: `frontend/package-lock.json`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `find /vol1/1000/docker/subscription_manager -name 'subscription_manager_dev_task.md' -o -name 'CODEX_PROMPT.md' -o -name 'subscription_help_docs.zip' -o -path '*/frontend/src/*' -o -path '*/docs/TASK_STATE.md' | sort`
+- `unzip -l /vol1/1000/docker/subscription_manager/subscription_help_docs.zip`
+- `unzip -p /vol1/1000/docker/subscription_manager/subscription_help_docs.zip CODEX_PROMPT.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/router/index.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/pages/LoginPage.vue`
+- `sed -n '1,260p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/package.json`
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/src/main.ts`
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/src/components/auth/AuthLayout.vue`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/docs/TASK_STATE.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/overview.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-party.md`
+- `npm install --prefix frontend marked`
+- `npm run build --prefix frontend`
+
+## Docker/Container Status
+
+- 本轮未执行 `docker compose` 或 NAS 发布脚本，容器状态未变更。
+
+## API/Interface Status
+
+- `/help` 已加入公开路由白名单，不会被登录态守卫拦截。
+- 未登录访问 `/admin/*`、`/dashboard` 的既有跳转逻辑保持不变。
+- 登录页新增“使用帮助”入口，前端路由可直接跳转到 `/help`。
+
+## Validation Result
+
+- `npm run build --prefix frontend` 通过。
+- Markdown 文档通过 `?raw` + `marked` 渲染。
+- 图片资源通过 `/help-assets/*.png` 正常引用。
+
+## Notes / Blockers
+
+- 未发现阻塞项。
+- `./scripts/nas-release.sh` 本轮未执行；如需要在 NAS 本地做完整发布验证，可在下一轮补跑。
+
+## Next Step
+
+- 如需进一步验收，可在 NAS 本地执行 `./scripts/nas-release.sh` 后再次检查 `/help`、`/login` 和登录守卫行为。
+
+## Date
+
 2026-06-03
 
 ## Round Goal

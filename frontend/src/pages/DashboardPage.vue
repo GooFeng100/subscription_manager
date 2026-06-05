@@ -44,9 +44,24 @@
 
     <div class="actions">
       <button class="btn primary" @click="copyLink">{{ copyState === "copied" ? "已复制" : copyButtonText }}</button>
+      <button class="btn warn" :disabled="resetting" @click="openResetConfirm">{{ resetting ? "重置中..." : "重置Token" }}</button>
       <button class="btn" @click="refresh">刷新状态</button>
       <button class="btn danger" @click="logout">退出登录</button>
     </div>
+
+    <div v-if="resetConfirmOpen" class="modal-mask" @click.self="closeResetConfirm">
+      <div class="modal confirm-modal">
+        <div class="modal-content">
+          <h3>重置订阅 Token</h3>
+          <p class="sub">确认重置订阅 Token 吗？旧链接会立即失效，新的订阅链接会同步更新。</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" :disabled="resetting" @click="closeResetConfirm">取消</button>
+          <button type="button" class="primary" :disabled="resetting" @click="resetToken">{{ resetting ? "重置中..." : "确认重置" }}</button>
+        </div>
+      </div>
+    </div>
+
     <p class="msg" :class="{ err: error }">{{ msg }}</p>
   </UserMobileLayout>
 </template>
@@ -81,6 +96,8 @@ const msg = ref("");
 const error = ref(false);
 const target = ref("clash");
 const copyState = ref<"idle" | "copied">("idle");
+const resetting = ref(false);
+const resetConfirmOpen = ref(false);
 const subInput = ref<HTMLInputElement | null>(null);
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
 const router = useRouter();
@@ -195,6 +212,38 @@ async function copyLink() {
     msg.value = "复制失败";
     error.value = true;
     copyState.value = "idle";
+  }
+}
+
+function openResetConfirm() {
+  if (resetting.value) {
+    return;
+  }
+  resetConfirmOpen.value = true;
+}
+
+function closeResetConfirm() {
+  if (resetting.value) {
+    return;
+  }
+  resetConfirmOpen.value = false;
+}
+
+async function resetToken() {
+  const current = me.value;
+  resetting.value = true;
+  try {
+    const data = await api<{ item: Me }>("/api/auth/user/reset-sub-token", { method: "POST" });
+    me.value = { ...(current ?? {}), ...data.item };
+    msg.value = "订阅 token 已重置，旧链接已失效";
+    error.value = false;
+    copyState.value = "idle";
+    resetConfirmOpen.value = false;
+  } catch (e) {
+    msg.value = (e as Error).message;
+    error.value = true;
+  } finally {
+    resetting.value = false;
   }
 }
 
@@ -324,7 +373,7 @@ void refresh();
 .actions {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -375,6 +424,113 @@ void refresh();
 }
 .btn.danger:active {
   background: #ffecec;
+}
+
+.btn.warn {
+  color: #8a4b00;
+  border-color: #f3d08d;
+}
+
+.btn.warn:hover {
+  border-color: #f0b94a;
+  background: #fff7e8;
+  color: #7c4200;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.14);
+}
+
+.btn.warn:active {
+  background: #fff0cf;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  box-shadow: none;
+}
+
+.btn:disabled:hover {
+  border-color: inherit;
+  background: inherit;
+  color: inherit;
+}
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(4px);
+}
+
+.confirm-modal {
+  width: min(420px, 100%);
+  border-radius: 16px;
+  border: 1px solid #dbe5f3;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+}
+
+.modal-content {
+  padding: 22px 20px 18px;
+}
+
+.modal-content h3 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+  color: #17386c;
+}
+
+.sub {
+  margin: 10px 0 0;
+  color: #51627f;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 20px 20px;
+}
+
+.modal-actions button {
+  min-height: 42px;
+  border-radius: 10px;
+  border: 1px solid #c8d4ea;
+  background: #fff;
+  color: #27406d;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-actions button:hover {
+  border-color: #7aa2ef;
+  background: #f3f7ff;
+  color: #1f4fb8;
+}
+
+.modal-actions button.primary {
+  border-color: #2c63de;
+  background: #2c63de;
+  color: #fff;
+}
+
+.modal-actions button.primary:hover {
+  border-color: #1f4fb8;
+  background: #1f4fb8;
+  color: #fff;
+}
+
+.modal-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .msg {
