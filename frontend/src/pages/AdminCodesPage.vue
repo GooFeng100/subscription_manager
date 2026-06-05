@@ -10,8 +10,15 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="filters">
-      <input id="admin-codes-filter-code" name="adminCodesFilterCode" v-model="qCode" placeholder="筛选授权码" />
-      <input id="admin-codes-filter-user" name="adminCodesFilterUser" v-model="qUser" placeholder="筛选使用用户" />
+      <input id="admin-codes-filter-code" name="adminCodesFilterCode" v-model="qCode" placeholder="筛选授权码" @keyup.enter="submitFilters" />
+      <input id="admin-codes-filter-user" name="adminCodesFilterUser" v-model="qUser" placeholder="筛选使用用户" @keyup.enter="submitFilters" />
+      <select id="admin-codes-filter-status" name="adminCodesFilterStatus" v-model="qStatus">
+        <option value="">全部状态</option>
+        <option value="unused">未使用</option>
+        <option value="used">已使用</option>
+        <option value="revoked">已作废</option>
+      </select>
+      <button type="button" :disabled="loadingCodes" @click="submitFilters">{{ loadingCodes ? '查询中...' : '查询' }}</button>
       <button type="button" class="add-btn" @click="openCreate">生成授权码</button>
     </div>
 
@@ -30,7 +37,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="c in filteredItems" :key="c.id">
+          <tr v-for="c in items" :key="c.id">
             <td>
               <button class="copy-code" type="button" @click="copyCode(c.code)">{{ c.code }}</button>
             </td>
@@ -48,13 +55,32 @@
               </div>
             </td>
           </tr>
-          <tr v-if="filteredItems.length === 0" class="empty-row">
+          <tr v-if="loadingCodes" class="empty-row">
+            <td colspan="8">加载中...</td>
+          </tr>
+          <tr v-else-if="items.length === 0" class="empty-row">
             <td colspan="8">暂无授权码数据</td>
           </tr>
         </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="8" class="codes-summary">
+              已使用 {{ stats.used }} 个 / 未使用 {{ stats.unused }} 个 / 已作废 {{ stats.revoked }} 个 / 共 {{ stats.total }} 个
+            </td>
+          </tr>
+        </tfoot>
       </table>
       <p class="copy-msg">{{ copyMsg }}</p>
     </div>
+
+    <footer class="logs-pagination">
+      <span>{{ rangeText }}</span>
+      <div class="pager">
+        <button type="button" :disabled="loadingCodes || currentPage <= 1" @click="goPage(currentPage - 1)">上一页</button>
+        <strong>{{ currentPage }} / {{ totalPages }}</strong>
+        <button type="button" :disabled="loadingCodes || currentPage >= totalPages" @click="goPage(currentPage + 1)">下一页</button>
+      </div>
+    </footer>
 
     <div v-if="createOpen" class="modal-mask">
       <div class="modal create-modal">
@@ -154,7 +180,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
 import { api, fmtDateOnly } from '../lib/api';
 
@@ -199,12 +225,31 @@ type CreateCodeResponse = {
     status: string;
   }>;
 };
+type ListCodeResponse = {
+  items: ApiCodeItem[];
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  stats?: {
+    total?: number;
+    used?: number;
+    unused?: number;
+    revoked?: number;
+  };
+};
+
+const PAGE_SIZE = 20;
 
 const items = ref<Item[]>([]);
 const error = ref('');
 const copyMsg = ref('');
 const qCode = ref('');
 const qUser = ref('');
+const qStatus = ref('');
+const loadingCodes = ref(false);
+const currentPage = ref(1);
+const total = ref(0);
+const stats = reactive({ total: 0, used: 0, unused: 0, revoked: 0 });
 
 const createOpen = ref(false);
 const createCount = ref(5);
@@ -250,11 +295,13 @@ function normalizeCodeItem(i: ApiCodeItem): Item {
   };
 }
 
-const filteredItems = computed(() => items.value.filter((c) => {
-  const okCode = qCode.value ? c.code.toLowerCase().includes(qCode.value.toLowerCase()) : true;
-  const okUser = qUser.value ? (c.used_by_username || '').toLowerCase().includes(qUser.value.toLowerCase()) : true;
-  return okCode && okUser;
-}));
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const rangeText = computed(() => {
+  if (total.value <= 0) return '第 0-0 条 / 共 0 条';
+  const start = (currentPage.value - 1) * PAGE_SIZE + 1;
+  const end = Math.min(currentPage.value * PAGE_SIZE, total.value);
+  return `第 ${start}-${end} 条 / 共 ${total.value} 条`;
+});
 
 function fmtDay(value: string | null | undefined) {
   return fmtDateOnly(value);
@@ -276,8 +323,37 @@ function statusLabel(item: Item) {
 }
 
 async function reloadCodes() {
-  const latest = await api<{ items: ApiCodeItem[] }>('/api/admin/codes');
-  items.value = (latest.items || []).map(normalizeCodeItem);
+  loadingCodes.value = true;
+  try {
+    const query = new URLSearchParams();
+    query.set('page', String(currentPage.value));
+    query.set('pageSize', String(PAGE_SIZE));
+    if (qCode.value.trim()) query.set('code', qCode.value.trim());
+    if (qUser.value.trim()) query.set('used_by_username', qUser.value.trim());
+    if (qStatus.value.trim()) query.set('status', qStatus.value.trim());
+    const latest = await api<ListCodeResponse>(`/api/admin/codes?${query.toString()}`);
+    items.value = (latest.items || []).map(normalizeCodeItem);
+    total.value = Number(latest.total || 0);
+    currentPage.value = Number(latest.page || currentPage.value || 1);
+    stats.total = Number(latest.stats?.total || latest.total || 0);
+    stats.used = Number(latest.stats?.used || 0);
+    stats.unused = Number(latest.stats?.unused || 0);
+    stats.revoked = Number(latest.stats?.revoked || 0);
+  } finally {
+    loadingCodes.value = false;
+  }
+}
+
+async function submitFilters() {
+  currentPage.value = 1;
+  await reloadCodes();
+}
+
+async function goPage(page: number) {
+  const nextPage = Math.max(1, Math.min(totalPages.value, page));
+  if (nextPage === currentPage.value) return;
+  currentPage.value = nextPage;
+  await reloadCodes();
 }
 
 async function copyCode(code: string) {
@@ -443,9 +519,12 @@ h1 { margin: 0; color: #0f172a; }
 .error { color: #b91c1c; margin: 0 0 10px; }
 .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
 
-.filters { display: grid; grid-template-columns: 1fr 1fr 120px; gap: 8px; margin-bottom: 12px; }
-.filters input, .filters button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
-.filters button { min-width: 96px; white-space: nowrap; }
+.filters { display: grid; grid-template-columns: 1fr 1fr 140px 96px 120px; gap: 8px; margin-bottom: 12px; }
+.filters input, .filters select, .filters button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
+.filters select { color: #334155; }
+.filters button { min-width: 96px; white-space: nowrap; cursor: pointer; }
+.filters button:hover { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.14); }
+.filters button:disabled { cursor: not-allowed; opacity: 0.65; box-shadow: none; }
 .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff; font-weight: 600; }
 
 .table-wrap { overflow-x: auto; }
@@ -453,6 +532,7 @@ h1 { margin: 0; color: #0f172a; }
 th, td { border-bottom: 1px solid #e2e8f0; text-align: left; padding: 10px 8px; font-size: 14px; vertical-align: middle; }
 th { color: #64748b; font-weight: 600; background: #f8fafc; }
 .empty-row td { text-align: center; color: #94a3b8; padding: 22px 8px; }
+.codes-summary { color: #475569; font-size: 13px; background: #f8fafc; }
 
 tbody tr { transition: background-color 0.16s ease; }
 tbody tr:hover { background: #f3f7ff; }
@@ -465,6 +545,12 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 .copy-code:hover { border-style: solid; border-color: #2563eb; background: #dbeafe; color: #1e40af; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
 .copy-code:active { transform: translateY(1px) scale(0.98); background: #bfdbfe; }
 .copy-msg { margin: 8px 0 0; color: #0f766e; font-size: 12px; }
+
+.logs-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-top: 1px solid #e2e8f0; background: #f8fafc; color: #475569; font-size: 13px; margin-top: 10px; border-radius: 0 0 12px 12px; }
+.pager { display: inline-flex; align-items: center; gap: 10px; }
+.pager strong { color: #0f172a; min-width: 64px; text-align: center; }
+.pager button { border: 1px solid #cbd5e1; background: #fff; color: #1f2937; border-radius: 8px; padding: 7px 12px; cursor: pointer; font-weight: 600; }
+.pager button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .status { display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
 .status.is-unused { background: #ecfdf3; color: #15803d; }
@@ -531,6 +617,8 @@ tbody tr:has(.copy-code:hover) { background: #edf4ff; }
 @media (max-width: 640px) {
   .filters { grid-template-columns: 1fr; }
   .filters button { min-height: 40px; }
+  .logs-pagination { align-items: stretch; flex-direction: column; }
+  .pager { justify-content: space-between; }
   .modal { width: calc(100vw - 24px); }
   .modal-actions { flex-wrap: wrap; }
   .modal-actions button { flex: 1 1 auto; min-width: 96px; }

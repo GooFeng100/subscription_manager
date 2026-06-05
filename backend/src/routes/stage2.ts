@@ -72,7 +72,10 @@ const updateCodeSchema = z.object({
 
 const listCodesQuerySchema = z.object({
   status: z.enum(["unused", "used", "revoked"]).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50)
+  code: z.string().trim().min(1).max(128).optional(),
+  used_by_username: z.string().trim().min(1).max(64).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20)
 });
 
 const redeemSchema = z.object({
@@ -103,6 +106,10 @@ function atStartOfDay(date: Date) {
 
 function isReservedAdminUsername(username: string) {
   return username.trim() === String(env.ADMIN_USERNAME || "").trim();
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function computeNextDates(previousExpireAt: Date | null, durationDays: number, graceDays: number) {
@@ -524,10 +531,55 @@ router.get("/admin/codes", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "Invalid query params" });
   }
   await expireFixedActivationCodes();
-  const filter = parsed.data.status ? { status: parsed.data.status } : {};
-  const docs = await activationCodesCol().find(filter).sort({ created_at: -1 }).limit(parsed.data.limit).toArray();
+  const filter: Record<string, unknown> = {};
+  if (parsed.data.status) {
+    filter.status = parsed.data.status;
+  }
+  if (parsed.data.code) {
+    filter.code = { $regex: escapeRegex(parsed.data.code), $options: "i" };
+  }
+  if (parsed.data.used_by_username) {
+    filter.used_by_username = { $regex: escapeRegex(parsed.data.used_by_username), $options: "i" };
+  }
+
+  const [total, statsDocs] = await Promise.all([
+    activationCodesCol().countDocuments(filter),
+    activationCodesCol()
+      .aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            used: { $sum: { $cond: [{ $eq: ["$status", "used"] }, 1, 0] } },
+            unused: { $sum: { $cond: [{ $eq: ["$status", "unused"] }, 1, 0] } },
+            revoked: { $sum: { $cond: [{ $eq: ["$status", "revoked"] }, 1, 0] } }
+          }
+        }
+      ])
+      .toArray()
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / parsed.data.pageSize));
+  const page = total === 0 ? 1 : Math.min(parsed.data.page, totalPages);
+  const docs = await activationCodesCol()
+    .find(filter)
+    .sort({ created_at: -1 })
+    .skip((page - 1) * parsed.data.pageSize)
+    .limit(parsed.data.pageSize)
+    .toArray();
+  const stats = statsDocs[0] || { total: 0, used: 0, unused: 0, revoked: 0 };
   return res.json({
-    items: docs.map((doc) => activationCodeView(doc))
+    items: docs.map((doc) => activationCodeView(doc)),
+    page,
+    pageSize: parsed.data.pageSize,
+    total,
+    stats: {
+      total: Number(stats.total || 0),
+      used: Number(stats.used || 0),
+      unused: Number(stats.unused || 0),
+      revoked: Number(stats.revoked || 0)
+    }
   });
 });
 

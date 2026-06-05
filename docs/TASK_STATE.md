@@ -6,6 +6,70 @@
 
 ## Round Goal
 
+授权码管理页增加状态筛选，列表改为每页 20 条的后端分页，并在表尾展示已使用 / 未使用 / 已作废 / 总数统计。
+
+## Project Current Status
+
+- `[frontend/src/pages/AdminCodesPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminCodesPage.vue)` 已改为调用后端分页接口，并增加状态筛选、查询按钮、分页控件和表尾统计。
+- `[backend/src/routes/stage2.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage2.ts)` 已支持 `status`、`code`、`used_by_username`、`page`、`pageSize` 查询参数，并返回总数与状态统计。
+- 列表默认每页 20 条，和日志页分页体验保持一致。
+- 本轮前后端构建已通过，没有发现编译错误。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `frontend/src/pages/AdminCodesPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `git status -sb`
+- `sed -n '1,260p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '1,260p' backend/src/routes/stage2.ts`
+- `sed -n '1,260p' frontend/src/pages/AdminLogsPage.vue`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `sed -n '260,520p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '260,520p' backend/src/routes/stage2.ts`
+- `sed -n '1,220p' frontend/src/lib/api.ts`
+- `git diff -- backend/src/routes/stage2.ts`
+- `sed -n '520,760p' frontend/src/pages/AdminCodesPage.vue`
+- `sed -n '520,760p' backend/src/routes/stage2.ts`
+- `rg -n "logs-pagination|pager|rangeText" frontend/src/pages -S`
+- `sed -n '470,540p' frontend/src/pages/AdminRotationPage.vue`
+- `npm run typecheck` in `backend/`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `backend/`
+- `npm run build` in `frontend/`
+
+## Docker/Container Status
+
+- 本轮未改动容器。
+
+## API/Interface Status
+
+- `GET /api/admin/codes` 现已支持筛选与分页，并返回 `total` 和 `stats`。
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `frontend` typecheck: pass
+- `backend` build: pass
+- `frontend` build: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 进行 git 提交、打 tag 并推送到远端仓库。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
 新增 `Clash Mi` 使用说明并检查前端构建，准备打 tag、提交并上传仓库。
 
 ## Project Current Status
