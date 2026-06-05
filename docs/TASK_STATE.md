@@ -6,6 +6,111 @@
 
 ## Round Goal
 
+新增 `Clash Mi` 使用说明并检查前端构建，准备打 tag、提交并上传仓库。
+
+## Project Current Status
+
+- `[frontend/src/content/help/clash-mi.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-mi.md)` 已新增并接入帮助目录。
+- `[frontend/src/content/help/index.ts](/vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts)` 已加入 `Clash Mi` 条目。
+- 前端 `typecheck` 和 `build` 已通过，没有编译错误。
+- 还需要把 `frontend/public/help-assets/*` 中本次新增的图片一并提交，避免云端帮助页缺图。
+
+## File Changes In This Round
+
+- Added: `frontend/src/content/help/clash-mi.md`
+- Updated: `frontend/src/content/help/index.ts`
+- Added: `frontend/public/help-assets/android.png`
+- Added: `frontend/public/help-assets/clash_mi_1.png`
+- Added: `frontend/public/help-assets/clash_mi_2.jpg`
+- Added: `frontend/public/help-assets/clash_mi_3.jpg`
+- Added: `frontend/public/help-assets/clash_mi_4.png`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `git status -sb`
+- `git log --oneline --decorate -5`
+- `sed -n '1,220p' frontend/src/content/help/clash-mi.md`
+- `sed -n '1,220p' frontend/src/content/help/index.ts`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+
+## Docker/Container Status
+
+- 本轮未改动容器。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 将新增 UI/help 资源提交、打 `v2026.06.06-1`，然后推送到远端仓库。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+新增「Clash Mi 使用说明」帮助页面并接入帮助目录，保持热更新查看。
+
+## Project Current Status
+
+- 已新增 `[frontend/src/content/help/clash-mi.md](/vol1/1000/docker/subscription_manager/frontend/src/content/help/clash-mi.md)`。
+- 已将 Clash Mi 页面接入 `[frontend/src/content/help/index.ts](/vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts)`。
+- 左侧帮助目录会显示「Clash Mi 使用说明」。
+- 本轮未构建，继续使用热更新查看。
+
+## File Changes In This Round
+
+- Added: `frontend/src/content/help/clash-mi.md`
+- Updated: `frontend/src/content/help/index.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/index.ts`
+- `sed -n '1,240p' /vol1/1000/docker/subscription_manager/frontend/src/content/help/clients.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/frontend/src/pages/HelpPage.vue`
+
+## Docker/Container Status
+
+- 现有 NAS 生产容器未改动。
+- 前端热更新开发服务继续运行中。
+
+## API/Interface Status
+
+- 接口未变更。
+
+## Validation Result
+
+- 未执行构建。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 刷新 `http://192.168.10.3:5173/help`，在目录里选择「Clash Mi 使用说明」查看。
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
 修复帮助页中 Clash Verge 云端图片无法加载的问题，统一图片路径为可部署访问的静态资源路径。
 
 ## Project Current Status

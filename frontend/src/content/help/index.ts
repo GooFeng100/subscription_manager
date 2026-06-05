@@ -4,6 +4,7 @@ import redeemCode from './redeem-code.md?raw'
 import subscriptionLink from './subscription-link.md?raw'
 import clashVerge from './clash-verge.md?raw'
 import surge from './surge.md?raw'
+import clashMi from './clash-mi.md?raw'
 import clashParty from './clash-party.md?raw'
 import clients from './clients.md?raw'
 import faq from './faq.md?raw'
@@ -58,6 +59,12 @@ export const helpArticles: HelpArticle[] = [
     title: 'Surge 使用说明',
     description: '导入订阅、选择模块并开启代理',
     content: surge,
+  },
+  {
+    id: 'clash-mi',
+    title: 'Clash Mi 使用说明',
+    description: '导入订阅、选择节点并开启代理',
+    content: clashMi,
   },
   {
     id: 'clients',
