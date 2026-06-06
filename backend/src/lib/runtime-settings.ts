@@ -33,21 +33,6 @@ function defaults(): RuntimeSettings {
   return runtimeSettingsSchema.parse({});
 }
 
-export function normalizeSubscriptionFilenameTemplate(template: string) {
-  const value = String(template || "").trim();
-  if (!value || value === "{{username}}" || value === "{{username}}_V{{version}}") {
-    return "{{username}}_云域数字";
-  }
-  return value;
-}
-
-function normalizeRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {
-  return {
-    ...settings,
-    subscription_filename_template: normalizeSubscriptionFilenameTemplate(settings.subscription_filename_template)
-  };
-}
-
 export async function getRuntimeSettings(): Promise<RuntimeSettings> {
   const doc = await systemStateCol().findOne({ key: SETTINGS_KEY });
   if (!doc?.payload) {
@@ -57,12 +42,12 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
   if (!parsed.success) {
     return defaults();
   }
-  return normalizeRuntimeSettings(parsed.data);
+  return parsed.data;
 }
 
 export async function updateRuntimeSettings(input: Partial<RuntimeSettings>): Promise<RuntimeSettings> {
   const current = await getRuntimeSettings();
-  const next = normalizeRuntimeSettings(runtimeSettingsSchema.parse({ ...current, ...input }));
+  const next = runtimeSettingsSchema.parse({ ...current, ...input });
   await systemStateCol().updateOne(
     { key: SETTINGS_KEY },
     { $set: { payload: next, updated_at: new Date() } },

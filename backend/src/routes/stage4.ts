@@ -3,7 +3,7 @@ import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { redis } from "../lib/redis.js";
-import { getRuntimeSettings, normalizeSubscriptionFilenameTemplate } from "../lib/runtime-settings.js";
+import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { subAccessLogsCol, usersCol } from "../lib/db.js";
 import { syncUserLifecycle } from "../services/user-lifecycle.js";
 import { formatShanghaiDate } from "../lib/shanghai-date.js";
@@ -48,6 +48,14 @@ function normalizeFilenamePart(value: string) {
     .replace(/\s+/g, " ")
     .replace(/\u0000/g, "")
     .slice(0, 120);
+}
+
+function normalizeSubscriptionFilenameTemplate(template: string) {
+  const value = String(template || "").trim();
+  if (!value || value === "{{username}}" || value === "{{username}}_V{{version}}") {
+    return "{{username}}_云域数字";
+  }
+  return value;
 }
 
 function buildSubscriptionFilename(
