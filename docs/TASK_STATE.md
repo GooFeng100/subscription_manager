@@ -9514,3 +9514,67 @@
 ## Next Step
 
 - 需要用用户实际看到老文件名的完整订阅入口 URL 或云端部署主机来继续定位；当前可访问的本机服务已是新版本。
+
+## 2026-06-07 云端运行时文件名模板自愈修复
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+确认云端后台设置页显示旧 `{{username}}_V{{version}}` 的原因，并修复运行时设置读取层没有规范化旧数据库值的问题。
+
+## Project Current Status
+
+- 订阅文件名模板属于运行时设置，存储在 MongoDB `system_state.runtime_settings.payload.subscription_filename_template`。
+- 云端数据库如果仍保存旧值 `{{username}}_V{{version}}`，后台设置页会显示旧模板。
+- 订阅输出路径此前已经会把旧默认模板映射为 `{{username}}_云域数字`；本轮将同一兼容逻辑上移到 `runtime-settings`，让后台设置读取和保存也使用新模板。
+- `{{username}}` 空值和 `{{username}}_V{{version}}` 旧默认值都会规范化为 `{{username}}_云域数字`。
+- 本轮未改数据库结构，未清空数据库，未删除 volume，未执行 `docker system prune`。
+
+## File Changes In This Round
+
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/routes/stage7.ts`
+- `sed -n '1,260p' backend/src/lib/runtime-settings.ts`
+- `sed -n '250,420p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '1,110p' backend/src/routes/stage4.ts`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up。
+- `subscription-manager-caddy`: Up。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 本轮未重建或重启容器。
+
+## API/Interface Status
+
+- `/api/admin/settings` 通过 `getRuntimeSettings()` 读取设置；部署本轮修复后，即使 MongoDB 中仍是旧默认模板，也会返回 `{{username}}_云域数字`。
+- `/api/admin/settings` 保存设置时通过 `updateRuntimeSettings()` 规范化模板；保存旧默认值会写回新默认模板。
+- `/sub/:token` 继续使用同一规范化逻辑生成文件名，不改变订阅核心业务逻辑。
+
+## Validation Result
+
+- backend build: pass。
+- frontend build: pass。
+- P0/P1: 当前未发现。
+
+## Notes / Blockers
+
+- 如果要让云端后台设置页立刻显示新模板，需要部署本次提交，或手动更新云端 MongoDB 里的运行时设置值。
+- 本轮没有直接操作 VPS 云端数据库。
+
+## Next Step
+
+- 提交并推送本轮运行时设置自愈修复；VPS 重新部署 `master` 后，后台设置页应显示 `{{username}}_云域数字`。
