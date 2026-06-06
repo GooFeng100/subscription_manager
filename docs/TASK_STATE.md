@@ -9683,3 +9683,78 @@
 ## Next Step
 
 - 部署到云端后，在 Cloudflare 后台按文档手动配置 WAF 规则，并验证 `/login` 被 Managed Challenge 保护、`/api/auth/login` 和 `/sub/*` 未被 Challenge。
+
+## 2026-06-07 关闭注册页内嵌 Turnstile
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+按用户反馈调整策略：注册页也不再需要页面内嵌 Turnstile 组件；登录页和注册页均由环境有效开关关闭页面组件。
+
+## Project Current Status
+
+- `TURNSTILE_REGISTER_ENABLED` 推荐默认值已从 `true` 改为 `false`。
+- `REGISTER_TURNSTILE_ENABLED` 旧变量兼容默认值已从 `true` 改为 `false`。
+- 后端有效 Turnstile 开关中，注册场景默认关闭；即使后台运行时设置里旧值仍为 true，只要环境变量为 false，`/config.turnstileRegisterEnabled` 也会返回 false。
+- 注册页仍保留按 `turnstileRegisterEnabled && turnstileSiteKey` 渲染的逻辑；当前默认配置下不会显示组件。
+- 注册接口在注册 Turnstile 有效关闭时不要求 Turnstile token。
+- `/sub/:token` 未修改，订阅 token、上游拉取、订阅转换逻辑未修改。
+
+## File Changes In This Round
+
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `compose.yaml`
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `docs/CLOUD_DEPLOYMENT_STEPS.md`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `grep -RIn "TURNSTILE_REGISTER_ENABLED\\|REGISTER_TURNSTILE_ENABLED\\|turnstileRegisterEnabled\\|注册页 Turnstile\\|注册页" ...`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `TURNSTILE_ENABLED=true TURNSTILE_LOGIN_ENABLED=false TURNSTILE_REGISTER_ENABLED=false docker compose -f compose.yaml up -d --build app caddy`
+- `curl -sS http://127.0.0.1:8084/config`
+- `curl -sS -i -H 'Content-Type: application/json' --data '{"username":"test0003","password":"Password12345"}' http://127.0.0.1:8084/api/auth/register`
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已重建重启，Up。
+- `subscription-manager-caddy`: 当前 Up。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- `/config`: 返回 `turnstileEnabled=true`、`turnstileLoginEnabled=false`、`turnstileRegisterEnabled=false`。
+- `/api/auth/register`: 未携带 Turnstile token 时不再返回 `TURNSTILE_VERIFY_FAILED`；使用已存在用户名测试返回业务错误 `Username already exists`。
+- 注册页根据 `/config.turnstileRegisterEnabled=false` 不渲染 Turnstile。
+- 登录页保持 `/config.turnstileLoginEnabled=false` 不渲染 Turnstile。
+
+## Validation Result
+
+- backend build: pass。
+- frontend build: pass。
+- Docker app rebuild: pass。
+- `/config.turnstileRegisterEnabled=false`: pass。
+- 注册接口不要求 Turnstile token: pass。
+- P0/P1: 当前未发现。
+
+## Notes / Blockers
+
+- 云端 `.env.prod` 需要同步设置 `TURNSTILE_REGISTER_ENABLED=false`，然后重新部署/重启 app。
+- 后台设置页可能仍显示数据库中的注册 Turnstile 开关旧值；实际页面和接口是否启用以 `/config` 与有效开关为准。
+
+## Next Step
+
+- 推送本轮变更；云端重新部署 master 后，注册页不再显示 Turnstile 组件。

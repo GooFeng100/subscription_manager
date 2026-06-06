@@ -248,7 +248,7 @@ ADMIN_PASSWORD=replace-this-admin-password
 REGISTRATION_ENABLED=true
 TURNSTILE_ENABLED=true
 TURNSTILE_LOGIN_ENABLED=false
-TURNSTILE_REGISTER_ENABLED=true
+TURNSTILE_REGISTER_ENABLED=false
 TURNSTILE_SITE_KEY=replace-with-production-site-key
 TURNSTILE_SECRET_KEY=replace-with-production-secret-key
 
@@ -274,10 +274,10 @@ SUB_CONVERTER_TIMEOUT_MS=10000
 生产建议使用 Cloudflare WAF Custom Rule 的 Managed Challenge 保护登录页面，并关闭登录页内嵌 Turnstile：
 
 - DNS 记录需要开启 Cloudflare 橙云代理。
-- `.env.prod` 推荐设置 `TURNSTILE_ENABLED=true`、`TURNSTILE_LOGIN_ENABLED=false`、`TURNSTILE_REGISTER_ENABLED=true`。
+- `.env.prod` 推荐设置 `TURNSTILE_ENABLED=true`、`TURNSTILE_LOGIN_ENABLED=false`、`TURNSTILE_REGISTER_ENABLED=false`。
 - `/login` 使用 Cloudflare Managed Challenge 做前置验证。
 - 登录页内嵌 Turnstile 默认关闭，避免 Cloudflare Challenge 和页面 Turnstile 双重验证。
-- 注册页 Turnstile 可继续开启，由 `TURNSTILE_REGISTER_ENABLED` 控制。
+- 注册页内嵌 Turnstile 默认关闭；如后续需要再打开，可由 `TURNSTILE_REGISTER_ENABLED` 控制。
 - `/sub/*` 必须跳过 Challenge；Clash、Mihomo、Shadowrocket 等客户端无法完成网页验证。
 - `/api/auth/login` 不建议做 Cloudflare Challenge，避免前端 API 请求收到 Cloudflare HTML 验证页。
 - 如果 Cloudflare Bot Fight Mode 误伤订阅接口，需关闭或调整 Cloudflare Bot 相关设置。

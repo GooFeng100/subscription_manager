@@ -119,7 +119,7 @@
   - **修改后需重建/重启**：`app`
 - `TURNSTILE_REGISTER_ENABLED`
   - **必须上线前配置**
-  - 生产建议为 `true`
+  - 生产建议为 `false`，注册页默认不显示内嵌 Turnstile
   - **不能提交 Git**
   - **修改后需重建/重启**：`app`
 - `TURNSTILE_SITE_KEY`
@@ -157,7 +157,7 @@
 - `TURNSTILE_SITE_KEY` 是否为正式 key
 - `TURNSTILE_SECRET_KEY` 是否为正式 secret
 - 登录页是否启用 Turnstile
-- 注册页是否启用 Turnstile
+- 注册页是否启用 Turnstile；当前生产建议关闭
 - 授权码兑换页不启用 Turnstile
 - `/sub/:token` 不启用 Turnstile
 

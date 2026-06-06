@@ -27,7 +27,7 @@ export function buildEffectiveTurnstileSettings(settings: Pick<RuntimeSettings,
     turnstileLoginEnabled:
       globalEnabled && boolFromEnvPair(env.TURNSTILE_LOGIN_ENABLED, env.LOGIN_TURNSTILE_ENABLED, false) && settings.login_turnstile_enabled,
     turnstileRegisterEnabled:
-      globalEnabled && boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, true) && settings.register_turnstile_enabled
+      globalEnabled && boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, false) && settings.register_turnstile_enabled
   };
 }
 
@@ -52,7 +52,7 @@ const runtimeSettingsSchema = z.object({
     .default(boolFromEnvPair(env.TURNSTILE_LOGIN_ENABLED, env.LOGIN_TURNSTILE_ENABLED, false)),
   register_turnstile_enabled: z
     .boolean()
-    .default(boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, true)),
+    .default(boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, false)),
   site_domain: z.string().default(env.APP_BASE_URL)
 });
 
