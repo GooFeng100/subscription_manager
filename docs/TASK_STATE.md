@@ -9439,3 +9439,78 @@
 ## Next Step
 
 - 提交当前修复，创建 2026-06-07 发布 tag，并推送 `master` 与 tag 到 `origin`。
+
+## 2026-06-07 云端版本与文件名格式检查
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+排查用户反馈“云端版本文件名仍像老格式，可能没有更新到新版本”的问题。
+
+## Project Current Status
+
+- GitHub `origin/master` 已指向 `7514721 fix: stabilize subscription output headers`。
+- GitHub tag `v2026.06.07` 已指向同一提交 `7514721`。
+- 本地工作区检查前为 clean。
+- 当前 NAS 容器内 `dist` 已包含新默认模板 `{{username}}_云域数字`，并保留旧默认模板 `{{username}}_V{{version}}` 到新模板的兼容映射。
+- MongoDB `runtime_settings.payload.subscription_filename_template` 当前为 `{{username}}_云域数字`。
+- `http://127.0.0.1:8084` 通过 Caddy 访问当前服务，订阅响应头为新文件名主体。
+- `http://192.168.10.3:8084` 从当前执行环境访问超时，无法在本环境直接验证该 LAN 入口。
+- `https://sub.889100.xyz` 返回 Cloudflare 404，未命中当前订阅服务。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `git status --short && git log --oneline --decorate -3 && git ls-remote origin refs/heads/master refs/tags/v2026.06.07`
+- `docker compose -f compose.yaml ps`
+- `curl -sS -L -A 'Clash' -D - -o /tmp/sub-cloud-check.body --max-time 15 "http://127.0.0.1:8084/sub/{masked-token}?target=${target}"`
+- `curl -sS -L -A 'Clash' -D - -o /tmp/sub-cloud-check.body --max-time 15 "http://192.168.10.3:8084/sub/{masked-token}?target=${target}"`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`
+- `grep -RIn "{{username}}_V\\|_V{{version}}\\|V{{version}}\\|filename_template\\|subscription_filename_template" backend frontend docs --exclude-dir=node_modules --exclude-dir=dist`
+- `git show --stat --oneline v2026.06.07`
+- `docker compose -f compose.yaml exec -T app sh -lc "grep -RIn '{{username}}_云域数字\\|{{username}}_V{{version}}\\|Profile-Title\\|Profile-Update-Interval' dist | head -80"`
+- `curl -sS -L -A 'Clash' -D - -o /tmp/sub-prod-check.body --max-time 20 "https://sub.889100.xyz/sub/{masked-token}?target=${target}"`
+- `curl -sS -i --max-time 10 http://127.0.0.1:8084/health`
+- `curl -sS -i --max-time 10 http://127.0.0.1:8084/config`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up。
+- `subscription-manager-caddy`: Up。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- `127.0.0.1:8084 target=clash`: `filename*=UTF-8''test0003_%E4%BA%91%E5%9F%9F%E6%95%B0%E5%AD%97.yaml`，`Profile-Title: test0003_云域数字`。
+- `127.0.0.1:8084 target=ss`: `.txt`，`Profile-Title: test0003_云域数字`。
+- `127.0.0.1:8084 target=shadowrocket`: `.txt`，`Profile-Title: test0003_云域数字`。
+- `127.0.0.1:8084 target=sing-box`: `.json`，`Content-Type: application/json; charset=utf-8`，`Profile-Title: test0003_云域数字`。
+- `127.0.0.1:8084 /health`: HTTP 200。
+- `127.0.0.1:8084 /config`: HTTP 200，`appBaseUrl` 为 `http://192.168.10.3:8084`。
+- `192.168.10.3:8084`: 当前执行环境 curl 超时。
+- `sub.889100.xyz`: Cloudflare 404。
+
+## Validation Result
+
+- 远端仓库版本: pass，`origin/master` 与 `v2026.06.07` 均为 `7514721`。
+- 本机/NAS 容器运行版本: pass，dist 与 HTTP 响应均为新文件名主体。
+- 云端公开域名: fail/未接入，`https://sub.889100.xyz` 返回 404。
+- LAN 入口复核: blocked，当前执行环境到 `192.168.10.3:8084` 超时。
+
+## Notes / Blockers
+
+- 如果客户端看到 `test0003_V26...`，说明它访问的不是当前 `127.0.0.1:8084` 这套已更新服务，或客户端仍在使用旧订阅缓存/旧入口。
+- 当前响应仍包含 ASCII fallback `filename="test0003_____.yaml"`；这是给不支持 UTF-8 文件名的客户端使用的回退值。真正中文文件名在 `filename*` 中，支持该 header 的客户端会显示 `test0003_云域数字.yaml`。
+
+## Next Step
+
+- 需要用用户实际看到老文件名的完整订阅入口 URL 或云端部署主机来继续定位；当前可访问的本机服务已是新版本。
