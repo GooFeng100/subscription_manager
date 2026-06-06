@@ -9572,3 +9572,114 @@
 ## Next Step
 
 - 提交并推送回滚提交。
+
+## 2026-06-07 Cloudflare WAF 前置登录验证与 Turnstile 开关调整
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+优化登录验证方式：生产由 Cloudflare WAF Custom Rule 的 Managed Challenge 前置保护 `/login`，登录页内嵌 Turnstile 默认关闭，注册页 Turnstile 保留可配置开关。
+
+## Project Current Status
+
+- `/config` 新增 `turnstileLoginEnabled` 与 `turnstileRegisterEnabled`。
+- 有效 Turnstile 开关现在由全局环境变量、场景环境变量和后台运行时设置共同决定：
+  - `TURNSTILE_ENABLED=false` 时，登录/注册 Turnstile 均关闭。
+  - `TURNSTILE_ENABLED=true` 时，登录受 `TURNSTILE_LOGIN_ENABLED` 与后台登录开关共同控制。
+  - `TURNSTILE_ENABLED=true` 时，注册受 `TURNSTILE_REGISTER_ENABLED` 与后台注册开关共同控制。
+- 新推荐生产默认：`TURNSTILE_ENABLED=true`、`TURNSTILE_LOGIN_ENABLED=false`、`TURNSTILE_REGISTER_ENABLED=true`。
+- 旧环境变量 `LOGIN_TURNSTILE_ENABLED` / `REGISTER_TURNSTILE_ENABLED` 保留后端兼容，但不再作为模板推荐字段。
+- 登录页只在 `turnstileLoginEnabled=true` 且有 site key 时渲染 Turnstile。
+- 登录接口只在登录 Turnstile 有效启用时校验 Turnstile token；关闭时不要求 token。
+- 注册页只在 `turnstileRegisterEnabled=true` 且有 site key 时渲染 Turnstile。
+- 注册 Turnstile 处理 callback、error-callback、expired-callback、timeout-callback，并提供“重新验证”按钮。
+- Turnstile token 在注册提交后清空；失败时重置小组件，避免重复提交旧 token。
+- 后端 Turnstile siteverify 失败时记录脱敏日志，仅包含 success、errorCodes、hostname、action、challengeTs、durationMs。
+- `/sub/:token` 未修改，订阅 token、上游拉取、订阅转换逻辑未修改。
+
+## File Changes In This Round
+
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `compose.yaml`
+- Updated: `docker-compose.prod.yml`
+- Updated: `backend/src/config/env.ts`
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/index.ts`
+- Updated: `backend/src/services/turnstile.ts`
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `frontend/src/lib/public-config.ts`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/RegisterPage.vue`
+- Updated: `frontend/src/components/auth/TurnstileWidget.vue`
+- Updated: `docs/CLOUD_DEPLOYMENT_STEPS.md`
+- Updated: `docs/PRODUCTION_DEPLOYMENT_CHECKLIST.md`
+- Updated: `docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' .codex/skills/subscription-manager-project/SKILL.md`
+- `grep -RIn "TURNSTILE\\|turnstile\\|/config\\|auth/login\\|auth/register" backend/src frontend/src .env.example .env.production.example backend/.env.example frontend/.env.example docs --exclude-dir=node_modules --exclude-dir=dist`
+- `sed -n '1,180p' backend/src/config/env.ts`
+- `sed -n '60,110p' backend/src/index.ts`
+- `sed -n '1,260p' backend/src/routes/auth.ts`
+- `sed -n '1,220p' backend/src/services/turnstile.ts`
+- `sed -n '1,240p' frontend/src/pages/LoginPage.vue`
+- `sed -n '1,240p' frontend/src/pages/RegisterPage.vue`
+- `sed -n '1,220p' frontend/src/components/auth/TurnstileWidget.vue`
+- `sed -n '1,80p' frontend/src/lib/public-config.ts`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `TURNSTILE_ENABLED=true TURNSTILE_LOGIN_ENABLED=false TURNSTILE_REGISTER_ENABLED=true docker compose -f compose.yaml up -d --build app caddy`
+- `curl -sS http://127.0.0.1:8084/config`
+- `curl -sS -i -H 'Content-Type: application/json' --data '{"username":"admin","password":"wrong-password"}' http://127.0.0.1:8084/api/auth/login`
+- `curl -sS -i -H 'Content-Type: application/json' --data '{"username":"codexTurnstileCheck","password":"Password12345"}' http://127.0.0.1:8084/api/auth/register`
+- `curl -sS -L -A 'Clash' -D - -o /tmp/turnstile-sub.body "http://127.0.0.1:8084/sub/{masked-token}?target=ss"`
+- `docker compose -f compose.yaml ps`
+- `git diff --check`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已重建重启，Up。
+- `subscription-manager-caddy`: 已重建重启，Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- `/config`: 返回 `turnstileEnabled=true`、`turnstileLoginEnabled=false`、`turnstileRegisterEnabled=true`。
+- `/api/auth/login`: 在未携带 Turnstile token 时不再返回 Turnstile 错误；错误账号密码返回 `{"ok":false,"message":"用户名或密码错误，或账号已禁用"}`。
+- `/api/auth/register`: 注册 Turnstile 有效启用时，未携带 token 返回 `{"error":"TURNSTILE_VERIFY_FAILED","message":"安全验证失败，请重新验证"}`。
+- `/sub/:token?target=ss`: 响应头仍保留 `.txt`、`Profile-Title`、`Profile-Update-Interval`、真实 `Subscription-Userinfo: expire=...`，正文大小正常。
+- 登录页渲染条件已改为 `turnstileLoginEnabled && turnstileSiteKey`；当前 `/config.turnstileLoginEnabled=false` 时不会渲染 Turnstile。
+- 注册页渲染条件已改为 `turnstileRegisterEnabled && turnstileSiteKey`。
+
+## Validation Result
+
+- backend build: pass。
+- frontend build: pass。
+- Docker app/caddy rebuild: pass。
+- `/config` 登录关、注册开: pass。
+- 登录接口不要求 Turnstile token: pass。
+- 注册接口仍按配置要求 Turnstile token: pass。
+- 注册 Turnstile 错误/过期/超时处理: implemented。
+- `/sub/:token` 回归检查: pass。
+- `git diff --check`: pass。
+- P0/P1: 当前未发现。
+
+## Notes / Blockers
+
+- 本轮未修改 Cloudflare WAF；`docs/CLOUD_DEPLOYMENT_STEPS.md` 已写入需要用户手动配置的 Skip 与 Managed Challenge 规则。
+- 当前环境没有 Playwright 包，未做浏览器 DOM 自动截图验收；登录页关闭 Turnstile 通过 `/config` 结果和源码渲染条件确认。
+
+## Next Step
+
+- 部署到云端后，在 Cloudflare 后台按文档手动配置 WAF 规则，并验证 `/login` 被 Managed Challenge 保护、`/api/auth/login` 和 `/sub/*` 未被 Challenge。

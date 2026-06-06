@@ -112,12 +112,14 @@
   - **必须上线前配置**
   - **不能提交 Git**
   - **修改后需重建/重启**：`app`
-- `LOGIN_TURNSTILE_ENABLED`
+- `TURNSTILE_LOGIN_ENABLED`
   - **必须上线前配置**
+  - 生产建议为 `false`，由 Cloudflare WAF Managed Challenge 保护 `/login`
   - **不能提交 Git**
   - **修改后需重建/重启**：`app`
-- `REGISTER_TURNSTILE_ENABLED`
+- `TURNSTILE_REGISTER_ENABLED`
   - **必须上线前配置**
+  - 生产建议为 `true`
   - **不能提交 Git**
   - **修改后需重建/重启**：`app`
 - `TURNSTILE_SITE_KEY`

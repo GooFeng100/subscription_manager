@@ -247,8 +247,8 @@ ADMIN_PASSWORD=replace-this-admin-password
 
 REGISTRATION_ENABLED=true
 TURNSTILE_ENABLED=true
-LOGIN_TURNSTILE_ENABLED=true
-REGISTER_TURNSTILE_ENABLED=true
+TURNSTILE_LOGIN_ENABLED=false
+TURNSTILE_REGISTER_ENABLED=true
 TURNSTILE_SITE_KEY=replace-with-production-site-key
 TURNSTILE_SECRET_KEY=replace-with-production-secret-key
 
@@ -268,6 +268,52 @@ SUB_CONVERTER_TIMEOUT_MS=10000
 - 如果 `MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD` 与 `MONGODB_URI` 不一致，会导致启动后认证失败，请保持三者一致。
 - `.env.production.example` 仍保留在仓库里，作为模板。
 - 生产环境变量改动后，至少需要重启 `app`，如果涉及前端构建变量，还要重新构建前端并更新 `caddy` 挂载目录。
+
+## 6.1 Cloudflare 前置登录验证配置说明
+
+生产建议使用 Cloudflare WAF Custom Rule 的 Managed Challenge 保护登录页面，并关闭登录页内嵌 Turnstile：
+
+- DNS 记录需要开启 Cloudflare 橙云代理。
+- `.env.prod` 推荐设置 `TURNSTILE_ENABLED=true`、`TURNSTILE_LOGIN_ENABLED=false`、`TURNSTILE_REGISTER_ENABLED=true`。
+- `/login` 使用 Cloudflare Managed Challenge 做前置验证。
+- 登录页内嵌 Turnstile 默认关闭，避免 Cloudflare Challenge 和页面 Turnstile 双重验证。
+- 注册页 Turnstile 可继续开启，由 `TURNSTILE_REGISTER_ENABLED` 控制。
+- `/sub/*` 必须跳过 Challenge；Clash、Mihomo、Shadowrocket 等客户端无法完成网页验证。
+- `/api/auth/login` 不建议做 Cloudflare Challenge，避免前端 API 请求收到 Cloudflare HTML 验证页。
+- 如果 Cloudflare Bot Fight Mode 误伤订阅接口，需关闭或调整 Cloudflare Bot 相关设置。
+
+规则 1：Skip 订阅和静态接口。该规则放在 Challenge 规则前面。
+
+```text
+http.host eq "sub.889100.xyz" and (
+  starts_with(http.request.uri.path, "/sub/")
+  or http.request.uri.path eq "/health"
+  or http.request.uri.path eq "/config"
+  or starts_with(http.request.uri.path, "/assets/")
+  or starts_with(http.request.uri.path, "/api/internal/")
+  or http.request.uri.path eq "/favicon.ico"
+)
+```
+
+动作：
+
+```text
+Skip
+```
+
+规则 2：Managed Challenge 登录页。
+
+```text
+http.host eq "sub.889100.xyz" and http.request.uri.path eq "/login"
+```
+
+动作：
+
+```text
+Managed Challenge
+```
+
+注意：只 Challenge `/login`，不要 Challenge `/sub/*`，也不要 Challenge `/api/auth/login`。
 
 ## 7. 补完整 `deploy.sh` 示例
 

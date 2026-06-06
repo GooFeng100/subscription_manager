@@ -5,6 +5,8 @@ export type PublicConfig = {
   nodeEnv: string;
   turnstileEnabled: boolean;
   turnstileSiteKey: string;
+  turnstileLoginEnabled: boolean;
+  turnstileRegisterEnabled: boolean;
 };
 
 export function getPublicConfig() {

@@ -9,6 +9,7 @@ function normalizeMessage(kind: AuthKind, status: number, message: string) {
     if (status === 401) return "用户名或密码错误，或账号已禁用";
     if (status === 429) return "登录失败次数过多，请稍后再试";
     if (status === 400) {
+      if (text === "安全验证失败，请重新验证") return text;
       if (text === "Turnstile token required") return "请先完成验证码";
       if (text === "Turnstile verification failed") return "验证码已失效，请重新验证后再试";
       if (text === "Turnstile request error") return "验证码校验失败，请稍后重试";
@@ -21,6 +22,7 @@ function normalizeMessage(kind: AuthKind, status: number, message: string) {
     if (status === 409) return "用户名已存在";
     if (status === 429) return "注册过于频繁，请稍后再试";
     if (status === 400) {
+      if (text === "安全验证失败，请重新验证") return text;
       if (text === "Turnstile token required") return "请先完成验证码";
       if (text === "Turnstile verification failed") return "验证码已失效，请重新验证后再试";
       if (text === "Turnstile request error") return "验证码校验失败，请稍后重试";

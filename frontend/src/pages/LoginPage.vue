@@ -21,10 +21,11 @@
         :icon-src="passwordIcon"
       />
       <TurnstileWidget
-        v-if="turnstileEnabled && turnstileSiteKey"
+        v-if="turnstileLoginEnabled && turnstileSiteKey"
         ref="turnstileWidget"
         v-model="turnstileToken"
         :site-key="turnstileSiteKey"
+        action="login"
       />
       <LoadingButton :loading="loading" :disabled="!username || !password" loading-text="登录中..." @click="submit">
         登录
@@ -63,12 +64,12 @@ const password = ref('');
 const loading = ref(false);
 const msg = ref('');
 const msgType = ref<'ok' | 'err' | ''>('');
-const turnstileEnabled = ref(false);
+const turnstileLoginEnabled = ref(false);
 const turnstileSiteKey = ref('');
 const turnstileToken = ref('');
 const turnstileWidget = ref<InstanceType<typeof TurnstileWidget> | null>(null);
 
-const turnstileRequired = computed(() => turnstileEnabled.value && Boolean(turnstileSiteKey.value));
+const turnstileRequired = computed(() => turnstileLoginEnabled.value && Boolean(turnstileSiteKey.value));
 
 function clearMessage() {
   if (!msg.value) return;
@@ -85,10 +86,10 @@ watch([username, password], () => {
 async function loadPublicConfig() {
   try {
     const config = await getPublicConfig();
-    turnstileEnabled.value = !!config.turnstileEnabled;
+    turnstileLoginEnabled.value = !!config.turnstileLoginEnabled;
     turnstileSiteKey.value = String(config.turnstileSiteKey || '').trim();
   } catch {
-    turnstileEnabled.value = false;
+    turnstileLoginEnabled.value = false;
     turnstileSiteKey.value = '';
   }
 }
@@ -107,7 +108,7 @@ async function submit() {
   const result = await postAuthJson<{ message?: string; dashboard?: string; userType?: string }>('login', '/api/auth/login', {
     username: username.value.trim(),
     password: password.value,
-    turnstileToken: turnstileToken.value || undefined
+    turnstileToken: turnstileRequired.value ? turnstileToken.value || undefined : undefined
   });
   if (!result.ok) {
     msg.value = result.message;

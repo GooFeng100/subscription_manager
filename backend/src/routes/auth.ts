@@ -120,7 +120,7 @@ router.post("/register", async (req, res) => {
       success: false,
       message: turnstile.message || "turnstile failed"
     });
-    return res.status(400).json({ message: turnstile.message });
+    return res.status(400).json({ error: turnstile.error, message: turnstile.message });
   }
 
   const exists = await usersCol().findOne({ username: trimmedUsername });
@@ -200,7 +200,7 @@ router.post("/login", async (req, res) => {
       success: false,
       message: turnstile.message || "turnstile failed"
     });
-    return res.json({ ok: false, message: turnstile.message });
+    return res.status(400).json({ ok: false, error: turnstile.error, message: turnstile.message });
   }
 
   if (admin) {

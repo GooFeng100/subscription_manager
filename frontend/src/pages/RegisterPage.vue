@@ -31,9 +31,15 @@
         :icon-src="passwordIcon"
       />
       <TurnstileWidget
-        v-if="turnstileEnabled && turnstileSiteKey"
+        v-if="turnstileRegisterEnabled && turnstileSiteKey"
+        ref="turnstileWidget"
         v-model="turnstileToken"
         :site-key="turnstileSiteKey"
+        action="register"
+        @expired="handleTurnstileExpired"
+        @error="handleTurnstileError"
+        @timeout="handleTurnstileTimeout"
+        @verified="handleTurnstileVerified"
       />
       <LoadingButton
         :loading="loading"
@@ -70,11 +76,12 @@ const confirmPassword = ref('');
 const loading = ref(false);
 const msg = ref('');
 const msgType = ref<'ok' | 'err' | ''>('');
-const turnstileEnabled = ref(false);
+const turnstileRegisterEnabled = ref(false);
 const turnstileSiteKey = ref('');
 const turnstileToken = ref('');
+const turnstileWidget = ref<InstanceType<typeof TurnstileWidget> | null>(null);
 
-const turnstileRequired = computed(() => turnstileEnabled.value && Boolean(turnstileSiteKey.value));
+const turnstileRequired = computed(() => turnstileRegisterEnabled.value && Boolean(turnstileSiteKey.value));
 
 function clearMessage() {
   if (!msg.value) return;
@@ -91,11 +98,35 @@ watch([username, password, confirmPassword, turnstileToken], () => {
 async function loadPublicConfig() {
   try {
     const config = await getPublicConfig();
-    turnstileEnabled.value = !!config.turnstileEnabled;
+    turnstileRegisterEnabled.value = !!config.turnstileRegisterEnabled;
     turnstileSiteKey.value = String(config.turnstileSiteKey || '').trim();
   } catch {
-    turnstileEnabled.value = false;
+    turnstileRegisterEnabled.value = false;
     turnstileSiteKey.value = '';
+  }
+}
+
+function handleTurnstileExpired() {
+  if (!turnstileRequired.value) return;
+  msg.value = '安全验证已过期，请重新验证';
+  msgType.value = 'err';
+}
+
+function handleTurnstileError() {
+  if (!turnstileRequired.value) return;
+  msg.value = '安全验证加载失败，请重新验证';
+  msgType.value = 'err';
+}
+
+function handleTurnstileTimeout() {
+  if (!turnstileRequired.value) return;
+  msg.value = '安全验证超时，请重新验证';
+  msgType.value = 'err';
+}
+
+function handleTurnstileVerified() {
+  if (msgType.value === 'err' && msg.value.includes('安全验证')) {
+    clearMessage();
   }
 }
 
@@ -121,11 +152,15 @@ async function submit() {
   const result = await postAuthJson('register', '/api/auth/register', {
     username: username.value.trim(),
     password: password.value,
-    turnstileToken: turnstileToken.value || undefined
+    turnstileToken: turnstileRequired.value ? turnstileToken.value || undefined : undefined
   });
+  turnstileToken.value = '';
   if (!result.ok) {
     msg.value = result.message;
     msgType.value = 'err';
+    if (turnstileRequired.value) {
+      turnstileWidget.value?.resetWidget();
+    }
     loading.value = false;
     return;
   }
