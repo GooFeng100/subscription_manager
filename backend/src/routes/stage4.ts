@@ -6,6 +6,14 @@ import { redis } from "../lib/redis.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { subAccessLogsCol, usersCol } from "../lib/db.js";
 import { syncUserLifecycle } from "../services/user-lifecycle.js";
+import { formatShanghaiDate } from "../lib/shanghai-date.js";
+import {
+  buildSubscriptionInfoName,
+  decorateRawSubscriptionContent,
+  decorateShadowrocketSubscriptionContent,
+  insertClashSubscriptionInfoGroup,
+  NODE_LINE_RE
+} from "../lib/subscription-display.js";
 import {
   countNodeProtocols,
   createShortCacheKey,
@@ -44,8 +52,8 @@ function normalizeFilenamePart(value: string) {
 
 function normalizeSubscriptionFilenameTemplate(template: string) {
   const value = String(template || "").trim();
-  if (!value || value === "{{username}}") {
-    return "{{username}}_V{{version}}";
+  if (!value || value === "{{username}}" || value === "{{username}}_V{{version}}") {
+    return "{{username}}_云域数字";
   }
   return value;
 }
@@ -54,9 +62,14 @@ function buildSubscriptionFilename(
   template: string,
   params: { username: string; target: string; expire: string; version: string }
 ) {
-  const fallback = `${params.username || "subscription"}_V${params.version || ""}`.replace(/_V$/, "");
-  const replaced = String(normalizeSubscriptionFilenameTemplate(template) || fallback)
-    .replace(/\{\{username\}\}/gi, params.username)
+  const username = String(params.username || "").trim();
+  const normalizedTemplate = normalizeSubscriptionFilenameTemplate(template);
+  const fallback = username ? `${username}_云域数字` : "云域数字";
+  if (!username && normalizedTemplate === "{{username}}_云域数字") {
+    return "云域数字";
+  }
+  const replaced = String(normalizedTemplate || fallback)
+    .replace(/\{\{username\}\}/gi, username)
     .replace(/\{\{target\}\}/gi, params.target)
     .replace(/\{\{expire\}\}/gi, params.expire)
     .replace(/\{\{version\}\}/gi, params.version);
@@ -87,6 +100,14 @@ function buildEmptySubscriptionContent(target: string) {
       "rules: []"
     ].join("\n");
   }
+  if (target === "sing-box" || target === "singbox") {
+    return JSON.stringify({
+      log: { level: "info" },
+      inbounds: [],
+      outbounds: [],
+      route: { rules: [] }
+    });
+  }
   return "";
 }
 
@@ -95,13 +116,27 @@ function buildShadowrocketSubscriptionContent(nodePoolText: string) {
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter(Boolean)
-    .filter((line) => /^(?:ss|trojan|vmess|vless|ssr):\/\//i.test(line));
+    .filter((line) => NODE_LINE_RE.test(line));
 
   if (!lines.length) {
     return "";
   }
 
   return Buffer.from(lines.join("\n"), "utf8").toString("base64");
+}
+
+function buildRawNodeSubscriptionContent(nodePoolText: string) {
+  return nodePoolText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => NODE_LINE_RE.test(line))
+    .join("\n");
+}
+
+function encodeBase64SubscriptionContent(text: string) {
+  const normalized = String(text || "").trim();
+  return normalized ? Buffer.from(normalized, "utf8").toString("base64") : "";
 }
 
 function normalizeConverterTarget(target: string) {
@@ -116,12 +151,7 @@ function normalizeConverterTarget(target: string) {
 }
 
 function formatSubscriptionExpireDate(user: { expire_at: Date | null; disable_after: Date | null }) {
-  const source = user.expire_at;
-  if (!source) return "";
-  const yyyy = source.getFullYear();
-  const mm = String(source.getMonth() + 1).padStart(2, "0");
-  const dd = String(source.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return formatShanghaiDate(user.expire_at);
 }
 
 function buildSubscriptionUserInfo(user: { expire_at: Date | null; disable_after: Date | null }) {
@@ -131,11 +161,37 @@ function buildSubscriptionUserInfo(user: { expire_at: Date | null; disable_after
   return `expire=${expire}`;
 }
 
-function buildContentDisposition(filename: string) {
+type SubscriptionResponseFormat = {
+  contentDisposition: "attachment" | "inline";
+  extension: "yaml" | "txt" | "json";
+  contentType: string;
+};
+
+function responseFormatForTarget(target: string): SubscriptionResponseFormat {
+  switch (target) {
+    case "ss":
+      return { contentDisposition: "inline", extension: "txt", contentType: "text/plain; charset=utf-8" };
+    case "shadowrocket":
+      return { contentDisposition: "attachment", extension: "txt", contentType: "text/plain; charset=utf-8" };
+    case "sing-box":
+    case "singbox":
+      return { contentDisposition: "attachment", extension: "json", contentType: "application/json; charset=utf-8" };
+    case "clash":
+    case "mihomo":
+    default:
+      return { contentDisposition: "attachment", extension: "yaml", contentType: "text/plain; charset=utf-8" };
+  }
+}
+
+function buildContentDisposition(filename: string, format: SubscriptionResponseFormat) {
   const base = normalizeFilenamePart(filename) || "subscription";
   const asciiSafe = base.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, '\\"') || "subscription";
   const encoded = encodeURIComponent(base);
-  return `attachment; filename="${asciiSafe}.yaml"; filename*=UTF-8''${encoded}.yaml`;
+  return `${format.contentDisposition}; filename="${asciiSafe}.${format.extension}"; filename*=UTF-8''${encoded}.${format.extension}`;
+}
+
+function headerUtf8(value: string) {
+  return Buffer.from(value, "utf8").toString("latin1");
 }
 
 async function writeAccessLog(params: {
@@ -205,17 +261,40 @@ router.get("/sub/:token", async (req, res) => {
   }
 
   const syncedUser = await syncUserLifecycle(user);
-  const responseHeaders = (response: import("express").Response, filename: string, userInfoHeader: string | null) => {
+  const responseHeaders = (
+    response: import("express").Response,
+    filename: string,
+    userInfoHeader: string | null,
+    responseTarget = target
+  ) => {
+    const format = responseFormatForTarget(responseTarget);
     response
       .setHeader("X-Subscription-Version", String(subVersion.version))
-      .setHeader("Content-Disposition", buildContentDisposition(filename))
+      .setHeader("Content-Disposition", buildContentDisposition(filename, format))
+      .setHeader("profile-title", headerUtf8(filename))
+      .setHeader("profile-update-interval", "24")
       .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
       .setHeader("Pragma", "no-cache")
-      .type("text/plain; charset=utf-8");
+      .setHeader("Content-Type", format.contentType);
     if (userInfoHeader) {
       response.setHeader("Subscription-Userinfo", userInfoHeader);
     }
     return response;
+  };
+  const responseFilename = (responseTarget = target) => buildSubscriptionFilename(
+    settings.subscription_filename_template || "{{username}}_云域数字",
+    {
+      username: syncedUser.username || "",
+      target: responseTarget,
+      expire: formatSubscriptionExpireDate(syncedUser),
+      version: String(subVersion.version)
+    }
+  );
+  const emptySubscriptionBody = (status: "expired" | "inactive" | "disabled") => {
+    if (target === "shadowrocket" || target === "ss") {
+      return "";
+    }
+    return buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle(status)}`;
   };
 
   if (syncedUser.status === "disabled") {
@@ -232,10 +311,10 @@ router.get("/sub/:token", async (req, res) => {
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
-      buildEmptySubscriptionTitle("disabled"),
+      responseFilename(),
       userInfoHeader
     );
-    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("disabled")}`);
+    return response.send(emptySubscriptionBody("disabled"));
   }
 
   if (syncedUser.status === "inactive") {
@@ -252,10 +331,10 @@ router.get("/sub/:token", async (req, res) => {
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
-      buildEmptySubscriptionTitle("inactive"),
+      responseFilename(),
       userInfoHeader
     );
-    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("inactive")}`);
+    return response.send(emptySubscriptionBody("inactive"));
   }
 
   if (isExpired(syncedUser.expire_at, now) && syncedUser.status === "expired") {
@@ -272,10 +351,10 @@ router.get("/sub/:token", async (req, res) => {
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
-      buildEmptySubscriptionTitle("expired"),
+      responseFilename(),
       userInfoHeader
     );
-    return response.send(target === "shadowrocket" ? "" : buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle("expired")}`);
+    return response.send(emptySubscriptionBody("expired"));
   }
 
   const rlKey = `sm:sub:rl:${token}:${ip}`;
@@ -312,7 +391,11 @@ router.get("/sub/:token", async (req, res) => {
   }
 
   if (target === "shadowrocket") {
-    const payload = buildShadowrocketSubscriptionContent(nodePoolText);
+    const expireDate = formatSubscriptionExpireDate(syncedUser);
+    const payload = decorateShadowrocketSubscriptionContent(
+      buildShadowrocketSubscriptionContent(nodePoolText),
+      `📌 V${subVersion.version}｜到期 ${expireDate}`
+    );
     if (!payload) {
       await writeAccessLog({
         userId: String(syncedUser._id),
@@ -341,14 +424,53 @@ router.get("/sub/:token", async (req, res) => {
     return responseHeaders(
       res.status(200),
       buildSubscriptionFilename(
-        settings.subscription_filename_template || "{{username}}_V{{version}}",
+        settings.subscription_filename_template || "{{username}}_云域数字",
         {
           username: syncedUser.username,
           target,
-          expire: formatSubscriptionExpireDate(syncedUser),
+          expire: expireDate,
           version: String(subVersion.version)
         }
       ),
+      userInfoHeader
+    ).send(payload);
+  }
+
+  if (target === "ss") {
+    const expireDate = formatSubscriptionExpireDate(syncedUser);
+    const rawPayload = decorateRawSubscriptionContent(
+      buildRawNodeSubscriptionContent(nodePoolText),
+      `📌 V${subVersion.version}｜到期 ${expireDate}`
+    );
+    const payload = encodeBase64SubscriptionContent(rawPayload);
+    if (!payload) {
+      await writeAccessLog({
+        userId: String(syncedUser._id),
+        username: syncedUser.username,
+        token,
+        target,
+        ip,
+        statusCode: 200,
+        success: true,
+        message: "raw node payload empty"
+      });
+      return res.status(200).type("text/plain; charset=utf-8").send("");
+    }
+
+    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+    await writeAccessLog({
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
+      token,
+      target,
+      ip,
+      statusCode: 200,
+      success: true,
+      message: `ok nodes=${countNodeProtocols(nodePoolText)} ss=raw`
+    });
+    return responseHeaders(
+      res.status(200),
+      responseFilename(),
       userInfoHeader
     ).send(payload);
   }
@@ -368,7 +490,7 @@ router.get("/sub/:token", async (req, res) => {
     converterUrl.searchParams.set("config", settings.converter_default_config_url);
   }
   const subscriptionFilename = buildSubscriptionFilename(
-    settings.subscription_filename_template || "{{username}}_V{{version}}",
+    settings.subscription_filename_template || "{{username}}_云域数字",
     {
       username: syncedUser.username,
       target,
@@ -414,6 +536,13 @@ router.get("/sub/:token", async (req, res) => {
       });
       return res.status(502).type("text/plain; charset=utf-8").send("converter returned empty payload");
     }
+    const expireDate = formatSubscriptionExpireDate(syncedUser);
+    const responseText = (target === "clash" || target === "mihomo")
+      ? insertClashSubscriptionInfoGroup(
+        text,
+        buildSubscriptionInfoName({ version: String(subVersion.version), expireDate })
+      )
+      : text;
     await writeAccessLog({
       userId: String(syncedUser._id),
       username: syncedUser.username,
@@ -428,14 +557,16 @@ router.get("/sub/:token", async (req, res) => {
     const response = res
       .status(200)
       .setHeader("X-Subscription-Version", String(subVersion.version))
-      .setHeader("Content-Disposition", buildContentDisposition(subscriptionFilename))
+      .setHeader("Content-Disposition", buildContentDisposition(subscriptionFilename, responseFormatForTarget(target)))
+      .setHeader("profile-title", headerUtf8(subscriptionFilename))
+      .setHeader("profile-update-interval", "24")
       .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
       .setHeader("Pragma", "no-cache")
-      .type("text/plain; charset=utf-8");
+      .setHeader("Content-Type", responseFormatForTarget(target).contentType);
     if (userInfoHeader) {
       response.setHeader("Subscription-Userinfo", userInfoHeader);
     }
-    return response.send(text);
+    return response.send(responseText);
   } catch (error) {
     const message = error instanceof Error ? error.message : "converter request error";
     await writeAccessLog({

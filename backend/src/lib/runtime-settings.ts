@@ -13,7 +13,7 @@ const runtimeSettingsSchema = z.object({
   converter_default_config_url: z
     .string()
     .default("https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini"),
-  subscription_filename_template: z.string().default("{{username}}_V{{version}}"),
+  subscription_filename_template: z.string().default("{{username}}_云域数字"),
   upstream_poll_interval_minutes: z.number().int().nonnegative().default(env.UPSTREAM_POLL_INTERVAL_MINUTES),
   upstream_fetch_proxy_url: z.string().default(env.UPSTREAM_FETCH_PROXY_URL || DEFAULT_UPSTREAM_FETCH_PROXY_URL),
   sub_rate_limit_per_minute: z.number().int().positive().default(env.SUB_RATE_LIMIT_PER_MINUTE),

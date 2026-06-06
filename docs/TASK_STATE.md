@@ -8656,3 +8656,786 @@
 ## Next Step
 
 - 部署新前端后，在登录页输入错误密码，确认错误提示稳定显示；随后直接输入正确密码并完成验证码，确认无需刷新即可登录。
+
+## 2026-06-06 订阅信息动态展示
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+为 `/sub/:token` 增加订阅内容内的动态版本号与账号有效期展示，保持订阅 token、固定分流规则配置和默认 subconverter 远程规则配置不变。
+
+## Project Current Status
+
+- 已在后端订阅响应链路中新增 Clash/Mihomo YAML 后处理：当目标为 `clash` 或 `mihomo` 且 subconverter 返回包含 `proxy-groups` 的 YAML 时，会先删除旧的 `📌 订阅信息｜` 前缀展示组，再插入新的展示策略组到 `proxy-groups` 第一位。
+- 新增展示策略组格式为 `📌 订阅信息｜V{version}｜到期 {yyyy-mm-dd}`，组类型为 `select`，仅包含 `DIRECT`，不改写 `rules`，也不改写原有主策略组名称。
+- 已在 Shadowrocket 返回链路中新增 Base64 后处理：返回前解码节点文本，找到首个可安全修改 URL fragment 的真实节点，把节点名改为 `📌 V{version}｜到期 {yyyy-mm-dd}｜原节点名` 后重新 Base64 编码。
+- 对 `vmess://base64` 和常见 `ssr://` 等名称不一定来自 URL fragment 的格式，若无法安全解析则跳过修改，避免破坏订阅导入。
+- 到期日期统一复用 `formatShanghaiDate()`，按东八区格式化为 `yyyy-mm-dd`，不显示小时分钟。
+- 版本号来源沿用后端 `getCurrentSubVersion()`，与响应头 `X-Subscription-Version` 使用同一份当前 subscription version。
+- `expired` / `inactive` / `disabled` 仍按当前逻辑返回 200 空订阅，不插入展示组或节点名。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `pwd && rg -n "subconverter|shadowrocket|mihomo|clash|X-Subscription-Version|version|expires|expire|proxy-groups|TASK_STATE" -S backend frontend docs scripts package.json`（环境无 `rg`，命令失败后改用 `grep`）
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/SKILL.md`
+- `find backend frontend docs scripts -type f \( -name '*.ts' -o -name '*.js' -o -name '*.vue' -o -name '*.md' -o -name '*.json' -o -name '*.yaml' -o -name '*.yml' \) -print | head -300`
+- `sed -n '1,260p' subscription_manager_dev_task.md`（根目录无该文件，改以 `docs/DEV_TASK.md` 与本轮用户需求为准）
+- `grep -RInE "subconverter|shadowrocket|mihomo|clash|X-Subscription-Version|subscription.*version|version|expires|expire|proxy-groups|/sub/|target" backend/src frontend/src docs scripts --exclude-dir=node_modules`
+- `find backend/src -type f -maxdepth 4 -print`
+- `sed -n '760,830p' docs/DEV_TASK.md`
+- `sed -n '1,430p' backend/src/routes/stage4.ts`
+- `sed -n '430,760p' backend/src/routes/stage4.ts`
+- `sed -n '1,260p' backend/src/lib/subscription-conversion.ts`
+- `cat backend/package.json && cat frontend/package.json`
+- `sed -n '1,240p' backend/src/lib/shanghai-date.ts && cat backend/tsconfig.json`
+- `git status --short`
+- `grep -RIn "describe\|vitest\|node:test\|jest" backend/src backend/package.json backend --exclude-dir=node_modules --exclude-dir=dist | head -100`
+- `tail -120 docs/TASK_STATE.md`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `npm run build --prefix backend`
+- `git diff -- backend/src/routes/stage4.ts`
+- `docker compose ps`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker 重建、重启、volume 删除、数据库清空或 `docker system prune`。
+- `docker compose ps` 只读检查结果：`app`、`caddy`、`mongodb`、`redis`、`subconverter` 均为 Up；`mongodb` 与 `redis` 为 healthy。
+- Docker Compose 提示同时存在 `compose.yaml` 与 `docker-compose.yml`，本次只读检查使用的是 `/vol1/1000/docker/subscription_manager/compose.yaml`。
+
+## API/Interface Status
+
+- `GET /sub/:token?target=clash` / `target=mihomo`：有效用户响应会在转换完成后动态插入展示用策略组；无 `proxy-groups` 时返回原 YAML，避免后端报错。
+- `GET /sub/:token?target=shadowrocket`：有效用户响应会在 Base64 返回前尝试修改首个真实节点 URL fragment；无法安全解析时跳过，仍返回原订阅内容。
+- `rules` 不新增、不改写对动态信息组的引用；原有主策略组名称保持不变。
+- 本轮未使用真实订阅 token 发起端到端接口请求，避免在无用户指定 token 的情况下触碰真实订阅数据。
+
+## Validation Result
+
+- 后端构建通过：`npm run build --prefix backend`。
+- 前端构建通过：`npm run build --prefix frontend`，产物包括 `dist/assets/index-FHMB3iHs.js` 与 `dist/assets/index-C0ahpMio.css`。
+- 后端二次构建通过：完成 Shadowrocket 边界收紧后再次执行 `npm run build --prefix backend` 成功。
+
+## Notes / Blockers
+
+- 未执行 `./scripts/nas-release.sh`，因为本轮要求是“如需 NAS 本地发布”，未收到明确发布确认。
+- 未新增自动化单元测试；当前仓库未发现现成测试脚本或测试框架入口，本轮以 TypeScript 构建和代码审查验证为主。
+
+## Next Step
+
+- 如需上线到 NAS，请在确认发布窗口后执行 `./scripts/nas-release.sh`，随后用测试账号刷新 Clash/Mihomo 与 Shadowrocket 客户端订阅做人工验收。
+
+## 2026-06-06 订阅信息动态展示测试
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+对订阅信息动态展示功能进行源码级与接口级测试，验证 Clash/Mihomo 动态策略组、Shadowrocket 首节点改名、构建与容器状态。
+
+## Project Current Status
+
+- 已将动态展示后处理逻辑从路由中拆分到 `backend/src/lib/subscription-display.ts`，便于直接测试实际函数。
+- `backend/src/routes/stage4.ts` 现在调用独立后处理库，行为保持一致：Clash/Mihomo 转换完成后插入展示组，Shadowrocket Base64 返回前修改首个可安全解析的节点名称。
+- 已用真实 MongoDB 中一个 active/grace 且有订阅 token 的用户做端到端接口测试；测试过程中仅使用完整 token 发起本机请求，未在测试报告中输出完整 token。
+- 端到端测试使用临时 Docker 网络 `sm-sub-display-test-net` 和临时容器 `sm-sub-display-test-app`，挂载当前源码运行测试 app；测试完成后已停止并清理临时容器与临时网络。
+
+## File Changes In This Round
+
+- Added: `backend/src/lib/subscription-display.ts`
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' backend/src/config/env.ts`
+- `sed -n '1,220p' compose.yaml`
+- `docker compose ps`
+- `docker network ls --format '{{.Name}}' | grep 'subscription'`
+- `docker compose exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（仅输出脱敏 token 信息）
+- `sed -n '1,220p' backend/src/lib/db.ts`
+- `sed -n '1,160p' backend/src/lib/redis.ts`
+- `./backend/node_modules/.bin/tsx --eval '...'`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^node:20|^node:20-alpine$|^subscription-manager-app:latest$'`
+- `docker compose ps --format json`
+- `sed -n '1,220p' backend/src/index.ts`
+- `docker network create sm-sub-display-test-net`
+- `docker network connect --alias mongodb sm-sub-display-test-net subscription-manager-mongodb`
+- `docker network connect --alias redis sm-sub-display-test-net subscription-manager-redis`
+- `docker network connect --alias subconverter sm-sub-display-test-net subscription_manager_subconverter`
+- `docker run -d --rm --name sm-sub-display-test-app --network sm-sub-display-test-net --network-alias app -p 127.0.0.1:3001:3000 -v /vol1/1000/docker/subscription_manager:/work -w /work ... node:20-alpine node backend/dist/index.js`
+- `curl -fsS http://127.0.0.1:3001/health`
+- `curl -sS -o /tmp/sm-sub-clash.yaml -w '%{http_code}' 'http://127.0.0.1:3001/sub/{masked-token}?target=clash'`
+- `curl -sS -o /tmp/sm-sub-mihomo.yaml -w '%{http_code}' 'http://127.0.0.1:3001/sub/{masked-token}?target=mihomo'`
+- `curl -sS -o /tmp/sm-sub-shadowrocket.txt -w '%{http_code}' 'http://127.0.0.1:3001/sub/{masked-token}?target=shadowrocket'`
+- `node --input-type=module <<'NODE' ... NODE`（验证响应内容，不输出节点正文）
+- `docker logs sm-sub-display-test-app`
+- `docker rm -f sm-sub-display-test-app`
+- `docker network disconnect sm-sub-display-test-net ...`
+- `docker network rm sm-sub-display-test-net`
+- `docker ps --format '{{.Names}}' | grep 'sm-sub-display-test-app' || true`
+- `docker network ls --format '{{.Name}}' | grep 'sm-sub-display-test-net' || true`
+- `git status --short`
+- `git diff --stat`
+
+## Docker/Container Status
+
+- 本轮未执行 Docker volume 删除、数据库清空、`docker system prune` 或 NAS 重启。
+- 测试期间短暂创建并清理了临时测试网络与临时测试 app 容器；正式 `subscription-manager-app` 未重启。
+- 测试后 `docker compose ps`：`app`、`caddy`、`mongodb`、`redis`、`subconverter` 均为 Up；`mongodb` 与 `redis` 为 healthy。
+- 临时容器 `sm-sub-display-test-app` 与临时网络 `sm-sub-display-test-net` 已不存在。
+
+## API/Interface Status
+
+- 临时测试 app `/health` 返回成功。
+- `GET /sub/:token?target=clash`：HTTP 200；`proxy-groups` 第一位为 `📌 订阅信息｜V26.6.103｜到期 2026-06-01`；动态信息组只出现 1 次；rules 未引用动态信息组；原有非信息策略组仍存在。
+- `GET /sub/:token?target=mihomo`：HTTP 200；同样验证动态信息组第一位、无重复、rules 不引用、原有非信息策略组仍存在。
+- `GET /sub/:token?target=shadowrocket`：HTTP 200；Base64 解码后首个节点名称匹配 `📌 V...｜到期 yyyy-mm-dd｜原节点名`。
+- 当前真实 subconverter 配置输出的示例原有策略组包括 `🚀 出站节点`、`🌍 国外媒体`、`📲 电报信息`；不是需求示例中的 `🚀 节点选择` / `♻️ 自动选择`，但已验证原有非信息组未被改名或移除。
+
+## Validation Result
+
+- 源码 helper 测试通过：
+  - 信息组名称格式正确。
+  - Clash YAML 旧信息组去重后只保留一个新信息组。
+  - 信息组插入 `proxy-groups` 第一位，内容为 `type: select` + `DIRECT`。
+  - 无 `proxy-groups` 时原文返回，不报错。
+  - Shadowrocket 只修改首个真实节点名，其他节点保持不变。
+  - `vmess://base64` 等无法安全 fragment 改名的格式会跳过。
+- 端到端接口测试通过：
+  - Clash：passed。
+  - Mihomo：passed。
+  - Shadowrocket：passed。
+- 后端构建通过：`npm run build --prefix backend`。
+- 前端构建通过：`npm run build --prefix frontend`。
+
+## Notes / Blockers
+
+- 第一次端到端断言使用了需求中的示例主策略组名称作为硬编码期望，但当前真实配置输出的组名不同；已改为验证“原有非信息组仍存在且动态信息组不被 rules 引用”，并通过。
+- 测试文件保存在 `/tmp/sm-sub-clash.yaml`、`/tmp/sm-sub-mihomo.yaml`、`/tmp/sm-sub-shadowrocket.txt`，其中包含订阅响应内容，仅用于本机测试，不在文档或最终回复中展开。
+- 本轮仍未执行 `./scripts/nas-release.sh`，正式 app 容器尚未部署新源码。
+
+## Next Step
+
+- 如需让 NAS 正式服务生效，执行 `./scripts/nas-release.sh` 或按既有发布流程重建/重启 app 与 caddy 后，再用客户端刷新订阅做人工验收。
+
+## 2026-06-06 NAS 发布订阅信息动态展示
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+将已自测通过的订阅信息动态展示改动发布到 NAS 正式服务，并验证 Web 入口、健康检查、配置接口和容器状态。
+
+## Project Current Status
+
+- 已在 NAS 正式 `compose.yaml` 环境完成发布，访问入口仍为 `http://192.168.10.3:8084`。
+- `subscription-manager-app` 已基于当前源码重建并重启。
+- `subscription-manager-caddy` 已无缓存重建并强制重启，确认静态首页 `Last-Modified` 更新为本轮发布时间。
+- 未删除 Docker volume，未清空数据库，未执行 `docker system prune`，未执行 NAS 重启。
+
+## File Changes In This Round
+
+- Updated: `docs/TASK_STATE.md`
+- Published existing changes: `backend/src/routes/stage4.ts`
+- Published existing changes: `backend/src/lib/subscription-display.ts`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/SKILL.md`
+- `find . -maxdepth 3 -type f \( -name 'docker-compose*.yml' -o -name 'compose*.yml' -o -name '*.sh' -o -name 'package.json' -o -name 'TASK_STATE.md' -o -name '.env*' \) | sort`
+- `git status --short`
+- `sed -n '1,260p' scripts/nas-release.sh`
+- `sed -n '1,260p' compose.yaml`
+- `npm ci --prefix backend`
+- `npm ci --prefix frontend`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose -f compose.yaml config >/dev/null`
+- `docker compose -f compose.yaml up -d --build app caddy`
+- `docker compose -f compose.yaml build --no-cache caddy`
+- `docker compose -f compose.yaml up -d --force-recreate caddy`
+- `docker compose -f compose.yaml ps`
+- `curl -i --max-time 10 http://127.0.0.1:8084/`
+- `curl -i --max-time 10 http://127.0.0.1:8084/health`
+- `curl -i --max-time 10 http://127.0.0.1:8084/config`
+- `docker compose -f compose.yaml logs --tail=80 app`
+- `git diff --stat`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建重启。
+- `subscription-manager-caddy`: Up，已在本轮无缓存重建并强制重启，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up 5 days，healthy。
+- `subscription-manager-redis`: Up 5 days，healthy。
+- `subscription_manager_subconverter`: Up 4 days。
+
+## API/Interface Status
+
+- `GET /`: HTTP 200，Caddy 返回新版首页，`Last-Modified: Sat, 06 Jun 2026 14:54:10 GMT`。
+- `GET /health`: HTTP 200，`mongo` 与 `redis` 均返回 `connected`。
+- `GET /config`: HTTP 200，`appBaseUrl` 为 `http://192.168.10.3:8084`，`nodeEnv` 为 `production`，Turnstile 配置可读取。
+- 正式 app 日志显示 `subscription-manager-backend listening on 3000`，未见启动错误。
+
+## Validation Result
+
+- `backend` 依赖同步通过；宿主机 Node 18 对项目 Node 20 要求有 engine warning，但未阻断安装。
+- `frontend` 依赖同步通过；`npm audit` 提示 2 个 moderate vulnerability，本轮未做破坏性升级修复。
+- `backend` build: pass。
+- `frontend` build: pass。
+- `docker compose -f compose.yaml up -d --build app caddy`: pass。
+- `docker compose -f compose.yaml build --no-cache caddy && docker compose -f compose.yaml up -d --force-recreate caddy`: pass。
+- NAS Web/API 冒烟检查: pass。
+
+## Notes / Blockers
+
+- 未执行 `./scripts/nas-release.sh`，因为脚本内部包含 `rm -rf frontend/dist`，项目规则要求未明确确认时不运行 `rm -rf`；本轮改为手动执行等价发布步骤。
+- 本轮未使用真实订阅 token 再次请求 `/sub/:token`，避免在发布环节输出或触碰真实 token；该功能此前已由用户完成自测。
+
+## Next Step
+
+- 在浏览器或客户端刷新 `http://192.168.10.3:8084` / 订阅链接，确认 NAS 正式服务效果。
+
+## 2026-06-06 修复 target=ss 空订阅
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修复浏览器访问 `/sub/:token?target=ss` 返回 `converter returned empty payload` 的问题，让 Shadowsocks/SS 入口不再依赖 subconverter 生成空结果。
+
+## Project Current Status
+
+- 已确认指定测试用户为 active，未过期，问题不是账号状态导致。
+- 已确认当前节点池共有 63 条可用节点 URI，但 `ss://` 为 0 条，节点主要为 `trojan://`。
+- 根因是 `target=ss` 之前走 subconverter 转换链路；在当前节点池和转换器目标下返回空正文，后端因此返回 502。
+- 已将 `target=ss` 改为后端直出 raw 节点 URI 文本，绕开 subconverter。
+- raw 直出会复用订阅动态展示逻辑，把第一条可安全修改 fragment 的节点名改为 `📌 V{version}｜到期 {yyyy-mm-dd}｜原节点名`。
+- `clash` / `mihomo` 仍继续走 subconverter，`shadowrocket` 仍走 Base64 直出链路。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `backend/src/lib/subscription-display.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,520p' backend/src/routes/stage4.ts`
+- `sed -n '1,260p' backend/src/lib/subscription-conversion.ts`
+- `sed -n '1,220p' backend/src/config/env.ts`
+- `docker compose -f compose.yaml logs --tail=140 app`
+- `curl -sS -o /tmp/sm-target-ss.txt -w 'http=%{http_code} bytes=%{size_download}\n' --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（仅输出脱敏 token）
+- `docker compose -f compose.yaml exec -T redis redis-cli get sm:sub:node-pool | node -e '...'`（仅输出协议计数）
+- `npm run build --prefix backend`
+- `docker compose -f compose.yaml up -d --build app`
+- `curl -sS -o /tmp/sm-target-ss-fixed.txt -w 'http=%{http_code} bytes=%{size_download}\n' --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `curl -sS -D - --max-time 10 http://127.0.0.1:8084/health`
+- `docker compose -f compose.yaml ps`
+- `docker compose -f compose.yaml logs --tail=80 app`
+- `curl -sS -o /tmp/sm-target-clash.yaml -w 'clash_http=%{http_code} bytes=%{size_download}\n' --max-time 20 'http://127.0.0.1:8084/sub/{masked-token}?target=clash'`
+- `curl -sS -o /tmp/sm-target-shadowrocket.txt -w 'shadowrocket_http=%{http_code} bytes=%{size_download}\n' --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=shadowrocket'`
+- `curl -sS -o /tmp/sm-target-ss-lan.txt -w 'http=%{http_code} bytes=%{size_download}\n' --max-time 15 'http://192.168.10.3:8084/sub/{masked-token}?target=ss'`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已在本轮重建重启，当前 Up。
+- `subscription-manager-caddy`: 当前 Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up 5 days，healthy。
+- `subscription-manager-redis`: Up 5 days，healthy。
+- `subscription_manager_subconverter`: Up 4 days。
+- 未删除 Docker volume，未清空数据库，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- 修复前 `GET /sub/:token?target=ss`: HTTP 502，正文 `converter returned empty payload`。
+- 修复后 `GET /sub/:token?target=ss`: HTTP 200，返回 63 行 raw 节点 URI，首条节点名含动态版本和到期信息。
+- `GET /sub/:token?target=clash`: HTTP 200，仍包含 `proxy-groups` 与 `📌 订阅信息｜V...` 展示组。
+- `GET /sub/:token?target=shadowrocket`: HTTP 200，Base64 解码后 63 行，首条节点名含动态版本和到期信息。
+- `GET /health`: HTTP 200，`mongo` 与 `redis` 均返回 `connected`。
+
+## Validation Result
+
+- 后端构建通过：`npm run build --prefix backend`。
+- Docker app 重建启动通过：`docker compose -f compose.yaml up -d --build app`。
+- `target=ss` 本机服务冒烟通过：HTTP 200，`bytes=10368`，`lines=63`。
+- `target=clash` 回归通过：HTTP 200，动态信息组存在。
+- `target=shadowrocket` 回归通过：HTTP 200，Base64 解码后动态节点名存在。
+
+## Notes / Blockers
+
+- NAS 主机本地直接 curl `http://192.168.10.3:8084/...` 超时，使用 `127.0.0.1:8084` 验证同一 Caddy 服务端口通过；局域网浏览器仍应使用 `http://192.168.10.3:8084`。
+- 当前节点池没有 `ss://` 节点；`target=ss` 现在返回的是 raw 节点 URI 列表，不再强制转换为纯 Shadowsocks 节点。
+- 测试输出文件保存在 `/tmp/sm-target-ss-fixed.txt`、`/tmp/sm-target-clash.yaml`、`/tmp/sm-target-shadowrocket.txt`，不在文档中展开节点正文。
+
+## Next Step
+
+- 用浏览器重新打开 `http://192.168.10.3:8084/sub/{token}?target=ss`，确认看到节点 URI 文本而不是 `converter returned empty payload`。
+
+## 2026-06-06 调整 target=ss 浏览器显示
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+修正 `/sub/:token?target=ss` 在浏览器中被当作 YAML 附件下载、且首条节点名显示百分号编码的问题，使其更适合无客户端时直接查看。
+
+## Project Current Status
+
+- `target=ss` 仍保持 raw 节点 URI 直出，不再经过 subconverter。
+- `target=ss` 响应头已从 `attachment; ... .yaml` 改为 `inline; ... .txt`，浏览器应直接打开文本。
+- `target=ss` raw 文本首条节点名改为未编码的可读文案，例如 `📌 V26.6.104｜到期 2026-06-20｜节点`。
+- `target=shadowrocket` 仍保持 URL fragment 百分号编码并 Base64 输出，避免影响 Shadowrocket 客户端导入。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `backend/src/lib/subscription-display.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' backend/src/lib/subscription-display.ts`
+- `sed -n '80,410p' backend/src/routes/stage4.ts`
+- `curl -sS -D /tmp/sm-ss-headers-before.txt -o /tmp/sm-ss-before.txt --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `npm run build --prefix backend`
+- `docker compose -f compose.yaml up -d --build app`
+- `curl -sS -D /tmp/sm-ss-headers-after.txt -o /tmp/sm-ss-after.txt --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `curl -sS -o /tmp/sm-shadowrocket-after.txt -w 'shadowrocket_http=%{http_code} bytes=%{size_download}\n' --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=shadowrocket'`
+- `curl -sS -D - --max-time 10 http://127.0.0.1:8084/health`
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已在本轮重建重启，当前 Up。
+- `subscription-manager-caddy`: 当前 Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up 5 days，healthy。
+- `subscription-manager-redis`: Up 5 days，healthy。
+- `subscription_manager_subconverter`: Up 4 days。
+- 未删除 Docker volume，未清空数据库，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- 修复前 `GET /sub/:token?target=ss`: HTTP 200，但 `Content-Disposition` 为 `attachment; filename="...yaml"`，首条节点名为百分号编码。
+- 修复后 `GET /sub/:token?target=ss`: HTTP 200，`Content-Disposition` 为 `inline; filename="test0003_V26.6.104.txt"`，`Content-Type` 为 `text/plain; charset=utf-8`。
+- 修复后 `target=ss` 返回 63 行节点 URI，首条节点名在文本中显示为可读中文/emoji。
+- `GET /sub/:token?target=shadowrocket`: HTTP 200，Base64 解码后 63 行，URL fragment 仍为编码格式。
+- `GET /health`: HTTP 200，`mongo` 与 `redis` 均返回 `connected`。
+
+## Validation Result
+
+- 后端构建通过：`npm run build --prefix backend`。
+- Docker app 重建启动通过：`docker compose -f compose.yaml up -d --build app`。
+- `target=ss` 浏览器显示响应头验证通过：inline + txt。
+- `target=ss` 首行可读文案验证通过。
+- `target=shadowrocket` 回归通过，仍保持编码 fragment。
+
+## Notes / Blockers
+
+- raw URI 中直接显示中文/emoji 更适合浏览器查看；严格 URI 客户端通常也可接受，但如后续发现某个客户端要求百分号编码，可为客户端新增独立 target，而不是影响浏览器查看入口。
+
+## Next Step
+
+- 用浏览器重新打开 `http://192.168.10.3:8084/sub/{token}?target=ss`，应直接显示文本，且第一条节点名应为可读中文。
+
+## 2026-06-06 target=ss Base64 与文件名改版
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+按最新要求调整订阅输出：`target=ss` 返回 Base64 编码内容，订阅文件名由 `username_Vx.x.xx` 改为 `username_云域数字`。
+
+## Project Current Status
+
+- `target=ss` 已从 raw 节点明文改为 Base64 输出；Base64 解码后仍是现有 raw 节点 URI 列表。
+- Shadowrocket 客户端拿到 `target=ss` 响应时看到的是 Base64 编码订阅内容。
+- 订阅文件名默认模板已改为 `{{username}}_云域数字`。
+- 后端对旧默认模板 `{{username}}_V{{version}}` 做兼容映射，即使数据库里曾保存旧模板，订阅响应文件名也会按新模板生成。
+- MongoDB 中已将 `runtime_settings.payload.subscription_filename_template` 从旧模板更新为 `{{username}}_云域数字`，后台设置页显示也会一致。
+- 后台设置页的模板 placeholder、示例和保存兜底已同步为 `{{username}}_云域数字`。
+
+## File Changes In This Round
+
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `grep -RIn "subscription_filename_template\\|V{{version}}\\|云域\\|buildSubscriptionFilename\\|buildInlineTextContentDisposition" backend/src frontend/src docs --exclude-dir=node_modules | head -200`
+- `sed -n '1,240p' backend/src/lib/runtime-settings.ts`
+- `sed -n '1,280p' backend/src/routes/stage7.ts`
+- `sed -n '1,220p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '220,330p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '370,405p' frontend/src/pages/AdminSettingsPage.vue`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（查询旧模板）
+- `docker compose -f compose.yaml up -d --build app caddy`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（更新运行时模板）
+- `curl -sS -D /tmp/sm-ss-b64-headers.txt -o /tmp/sm-ss-b64.txt --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `curl -sS -D /tmp/sm-clash-filename-headers.txt -o /tmp/sm-clash-filename.yaml --max-time 20 'http://127.0.0.1:8084/sub/{masked-token}?target=clash'`
+- `curl -sS -D - --max-time 10 http://127.0.0.1:8084/health`
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已在本轮重建重启，当前 Up。
+- `subscription-manager-caddy`: 已在本轮重建重启，当前 Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up 5 days，healthy。
+- `subscription-manager-redis`: Up 5 days，healthy。
+- `subscription_manager_subconverter`: Up 4 days。
+- 未删除 Docker volume，未清空数据库，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- `GET /sub/:token?target=ss`: HTTP 200，正文为 Base64 字符串，`bodyLooksBase64=true`。
+- `target=ss` Base64 解码后为 63 行节点 URI，首条节点仍包含动态版本与到期信息。
+- `target=ss` 响应头：`Content-Disposition: inline; filename="test0003_____.txt"; filename*=UTF-8''test0003_%E4%BA%91%E5%9F%9F%E6%95%B0%E5%AD%97.txt`。
+- `GET /sub/:token?target=clash`: HTTP 200，`Content-Disposition` 的 UTF-8 文件名为 `test0003_云域数字.yaml`，动态信息组仍存在。
+- `GET /health`: HTTP 200，`mongo` 与 `redis` 均返回 `connected`。
+
+## Validation Result
+
+- 后端构建通过：`npm run build --prefix backend`。
+- 前端构建通过：`npm run build --prefix frontend`。
+- Docker app/caddy 重建启动通过：`docker compose -f compose.yaml up -d --build app caddy`。
+- 运行时模板更新通过：MongoDB 查询返回 `{{username}}_云域数字`。
+- `target=ss` Base64 输出验证通过。
+- 新文件名验证通过；ASCII fallback 中中文会显示为下划线，`filename*` 中保留 UTF-8 中文名，浏览器应优先使用 `filename*`。
+
+## Notes / Blockers
+
+- 无。
+
+## Next Step
+
+- 用 Shadowrocket 或浏览器打开 `target=ss` 链接，确认客户端接收到 Base64 订阅内容，下载/保存文件名显示为 `用户名_云域数字`。
+
+## 2026-06-06 订阅输出机制审查
+
+## Date
+
+2026-06-06
+
+## Round Goal
+
+只审查当前订阅输出机制，不修改业务代码；生成 `docs/SUBSCRIPTION_OUTPUT_AUDIT.md`，覆盖响应头、文件名、版本号、YAML 信息组、SS/Shadowrocket Base64、用户状态和安全脱敏风险。
+
+## Project Current Status
+
+- 已完成订阅输出机制审查报告：`docs/SUBSCRIPTION_OUTPUT_AUDIT.md`。
+- 本轮未修改后端或前端业务代码。
+- 为完成 inactive/disabled 状态审查，临时插入 `codexAuditInactive` 与 `codexAuditDisabled` 两个测试用户；测试完成后已删除。
+- active/grace/expired 使用现有测试用户；所有 token 在输出和报告中均已脱敏。
+- 审查期间未清空数据库，未删除 volume，未执行 `docker system prune`，未重启 NAS。
+
+## File Changes In This Round
+
+- Added: `docs/SUBSCRIPTION_OUTPUT_AUDIT.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' /home/admin/.codex/attachments/.../pasted-text.txt`
+- `grep -R "subscription-userinfo\\|Subscription-Userinfo\\|Content-Disposition\\|X-Subscription-Version\\|profile-title\\|filename\\|云域数字\\|订阅信息\\|expire\\|upload\\|download\\|total\\|target=clash\\|target=mihomo\\|target=ss\\|target=shadowrocket" -n backend/src frontend/src docs | head -n 300`
+- `sed -n '1,560p' backend/src/routes/stage4.ts`
+- `sed -n '1,260p' backend/src/lib/subscription-display.ts`
+- `sed -n '1,220p' backend/src/lib/subscription-conversion.ts`
+- `sed -n '1,220p' backend/src/lib/runtime-settings.ts`
+- `sed -n '1,260p' frontend/src/pages/DashboardPage.vue`
+- `sed -n '1,340p' frontend/src/pages/AdminSettingsPage.vue`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（用户状态分布、脱敏 token、运行时设置）
+- `docker compose -f compose.yaml exec -T redis redis-cli get sm:sub:node-pool | node -e '...'`（仅输出协议计数）
+- `curl -L -A "Clash" -D /tmp/sub-audit/{target}.headers -o /tmp/sub-audit/{target}.body 'http://127.0.0.1:8084/sub/{masked-token}?target={target}'`
+- `python3` + `PyYAML` 临时审查脚本解析 Clash/Mihomo YAML 与 Base64 输出摘要
+- `curl` 状态矩阵测试：active/grace/expired/inactive/disabled × clash/ss/shadowrocket
+- `grep -RInE "console\\.(log|error|warn)|writeAccessLog|maskToken|maskUrlForLog|maskTrojanUrl|CONVERTER_SOURCE_SECRET|SESSION_SECRET|TURNSTILE_SECRET|sub_token|source_url|trojan://|ss://|vmess://|Clash:" backend/src frontend/src --exclude-dir=node_modules | head -260`
+- `docker compose -f compose.yaml logs --tail=220 app`（输出前已做脱敏 sed）
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up。
+- `subscription-manager-caddy`: Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+
+## API/Interface Status
+
+- `target=clash`: HTTP 200，YAML 解析通过，动态信息组 1 个且在 `proxy-groups` 第一位。
+- `target=mihomo`: HTTP 200，YAML 解析通过，结果与 `clash` 一致。
+- `target=ss`: HTTP 200，正文为 Base64，解码后 63 行节点。
+- `target=shadowrocket`: HTTP 200，正文为 Base64，解码后 63 行节点。
+- `target=sing-box`: HTTP 200，正文为 JSON，但当前文件名后缀仍是 `.yaml`。
+- `Subscription-Userinfo`: active/grace 返回 `expire=...`，缺少 `upload/download/total`。
+- `Content-Disposition`: 主体文件名已为 `用户名_云域数字`，中文通过 `filename*` 输出。
+- `X-Subscription-Version`: 已测 target 均为 `26.6.104`。
+
+## Validation Result
+
+- 审查报告生成完成：`docs/SUBSCRIPTION_OUTPUT_AUDIT.md`。
+- active/grace 用户真实订阅可用。
+- expired/inactive/disabled 不泄露节点。
+- 未发现 P0。
+- P1/P2 已在报告中分级列出。
+
+## Notes / Blockers
+
+- 本轮为审查，不做功能修复。
+- `/tmp/sub-audit` 中曾保存订阅响应体，仅用于本机审查；已在本轮结束前清理。
+
+## Next Step
+
+- 按 `docs/SUBSCRIPTION_OUTPUT_AUDIT.md` 的 P1/P2 建议选择下一轮修复范围，优先考虑补齐 `Subscription-Userinfo` 与 target 格式一致性。
+
+## 2026-06-07 订阅输出格式与响应头最小修复
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+根据 `docs/SUBSCRIPTION_OUTPUT_AUDIT.md` 做最小修复：仅调整订阅输出响应头、文件后缀、Content-Type 和非 active `target=ss` 格式；不改订阅核心业务逻辑，不改数据库结构，不伪造流量数据。
+
+## Project Current Status
+
+- 已保留 `Subscription-Userinfo: expire=...`，来源仍为用户真实 `expire_at` 的 Unix 秒级时间戳。
+- 未新增 `upload/download/total`，因为当前系统不统计真实流量。
+- 已新增 `Profile-Title: 用户名_云域数字`，与 `Content-Disposition` 文件名主体一致，不包含版本号或到期日。
+- 已新增 `Profile-Update-Interval: 24`。
+- 已按 target 修复文件后缀和 `Content-Type`：
+  - `clash`: `.yaml`, `text/plain; charset=utf-8`
+  - `mihomo`: `.yaml`, `text/plain; charset=utf-8`
+  - `sing-box`: `.json`, `application/json; charset=utf-8`
+  - `ss`: `.txt`, `text/plain; charset=utf-8`
+  - `shadowrocket`: `.txt`, `text/plain; charset=utf-8`
+- 已修复非 active `target=ss`：expired/inactive/disabled 返回 200 空正文，不再返回明文中文提示，也不泄露节点。
+- 未改 Clash/Mihomo 动态信息组位置、`rules`、`🚀 出站节点`、订阅 token、上游拉取、SS/Shadowrocket 首节点展示逻辑。
+
+## File Changes In This Round
+
+- Updated: `backend/src/routes/stage4.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,580p' backend/src/routes/stage4.ts`
+- `sed -n '1,220p' backend/src/lib/subscription-display.ts`
+- `node - <<'NODE' ... http.validateHeaderValue('profile-title', 'test0003_云域数字') ... NODE`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `docker compose -f compose.yaml up -d --build app`
+- `docker compose -f compose.yaml exec -T mongodb mongosh --quiet subscription_manager --eval '...'`（插入临时 inactive/disabled 验证用户，token 仅脱敏输出）
+- `curl -L -A "Clash" -D "/tmp/sub-fix/sub-${target}.headers" -o "/tmp/sub-fix/sub-${target}.body" "http://127.0.0.1:8084/sub/{masked-token}?target=${target}"`
+- `python3` 临时脚本验证 active 用户各 target 响应头、Base64、YAML/JSON 解析和伪造流量字段缺失
+- `curl` 验证 expired/inactive/disabled 的 `target=ss`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已在本轮重建重启，当前 Up。
+- `subscription-manager-caddy`: 未重建，当前 Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- active `target=clash`: HTTP 200，`Profile-Title: test0003_云域数字`，`Profile-Update-Interval: 24`，`Subscription-Userinfo: expire=1781971199`，`.yaml`。
+- active `target=mihomo`: HTTP 200，同 Clash，`.yaml`。
+- active `target=ss`: HTTP 200，`.txt`，Base64 正文，解码后 63 行节点。
+- active `target=shadowrocket`: HTTP 200，`.txt`，Base64 正文，解码后 63 行节点。
+- active `target=sing-box`: HTTP 200，`.json`，`Content-Type: application/json; charset=utf-8`，JSON 解析通过。
+- active 各 target 均未返回 `upload/download/total`。
+- expired/inactive/disabled `target=ss`: HTTP 200，空正文，不含中文提示，不含节点协议。
+- expired/disabled 如有 `expire_at`，继续返回 `Subscription-Userinfo: expire=...`；inactive 无 `expire_at`，不返回该 header。
+- Clash/Mihomo YAML 解析通过，动态信息组仍为 1 个且在第一位，`rules` 未引用信息组，`🚀 出站节点` 仍存在。
+
+## Validation Result
+
+- `backend` build: pass。
+- `frontend` build: pass。
+- Docker app rebuild/start: pass。
+- active 五 target 响应头验收: pass。
+- `Subscription-Userinfo` 保留真实 expire 且未添加伪造流量字段: pass。
+- `profile-title` / `profile-update-interval`: pass。
+- target 文件后缀与 Content-Type: pass。
+- 非 active `target=ss` 空正文与不泄露节点: pass。
+- Clash/Mihomo YAML 回归: pass。
+
+## Notes / Blockers
+
+- `profile-title` 需要中文；Node 不能直接设置非 latin1 header 值。本轮使用 UTF-8 bytes 透传方式设置，curl 验证显示为 `test0003_云域数字`。
+- 本轮未运行 `scripts/nas-release.sh`，因为脚本包含 `rm -rf frontend/dist`；改用手动构建与 `docker compose -f compose.yaml up -d --build app`。
+- 临时验证用户与 `/tmp/sub-fix` 响应体将在本轮收尾清理。
+
+## Next Step
+
+- 如需继续优化，可单独处理用户端 Dashboard target 列表与后端支持矩阵对齐；当前本轮 P0/P1 已清零。
+
+## 2026-06-07 修复 target=ss Base64 解码后节点名乱码
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+修复 `target=ss` 返回 Base64 后，解码出的首个节点 URL fragment 直接包含中文/emoji，部分客户端或文本工具显示为 `ð...` mojibake 的问题。
+
+## Project Current Status
+
+- `target=ss` 仍返回 Base64 编码正文。
+- Base64 解码后的节点列表仍是 raw 节点 URI 列表。
+- 首个节点的展示名 fragment 已改为 URL 百分号编码，例如 `%F0%9F%93%8C%20V...`。
+- 对 fragment 执行 URL decode 后显示为正常中文：`📌 V26.6.104｜到期 2026-06-20｜节点`。
+- `target=shadowrocket` 原有百分号编码逻辑保持不变。
+- 未修改订阅 token、上游拉取、Clash/Mihomo 信息组、rules 或流量统计逻辑。
+
+## File Changes In This Round
+
+- Updated: `backend/src/lib/subscription-display.ts`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/SKILL.md`
+- `sed -n '1,220p' backend/src/lib/subscription-display.ts`
+- `grep -RIn "decorateRawSubscriptionContent\\|decorateShadowrocketSubscriptionContent" backend/src --exclude-dir=node_modules`
+- `npm run build --prefix backend`
+- `docker compose -f compose.yaml up -d --build app`
+- `curl -sS -D /tmp/sub-ss-encoding.headers -o /tmp/sub-ss-encoding.body --max-time 15 'http://127.0.0.1:8084/sub/{masked-token}?target=ss'`
+- `node` 临时脚本验证 Base64、解码行数、fragment 编码、URL decode 后文案、mojibake 缺失
+
+## Docker/Container Status
+
+- `subscription-manager-app`: 已在本轮重建重启，当前 Up。
+- `subscription-manager-caddy`: 当前 Up。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- `GET /sub/:token?target=ss`: HTTP 200。
+- `Content-Disposition`: `inline; ... .txt`。
+- `Content-Type`: `text/plain; charset=utf-8`。
+- `Profile-Title`: `test0003_云域数字`。
+- `Subscription-Userinfo`: 保留真实 `expire=1781971199`。
+- Base64 正文验证通过，解码后 63 行节点。
+- 首节点 fragment 原文为百分号编码；URL decode 后为 `📌 V26.6.104｜到期 2026-06-20｜节点`。
+
+## Validation Result
+
+- 后端构建通过：`npm run build --prefix backend`。
+- Docker app 重建启动通过：`docker compose -f compose.yaml up -d --build app`。
+- `bodyLooksBase64=true`。
+- `decodedLines=63`。
+- `fragmentPercentEncoded=true`。
+- `hasMojibake=false`。
+
+## Notes / Blockers
+
+- 这次修复会让 Base64 解码后的 URL 看起来不再是直接中文，而是 URL 标准的百分号编码；客户端导入时会按 URL fragment 解码显示中文，更稳定。
+
+## Next Step
+
+- 在 Shadowrocket 或本地 Base64 解码工具中重新拉取 `target=ss`，确认不再显示 mojibake。
+
+## 2026-06-07 发布前文档复核与打 tag 准备
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+按用户要求检查订阅输出相关文档，确认构建与接口验收结果，准备提交、打 tag 并推送到仓库。
+
+## Project Current Status
+
+- `docs/SUBSCRIPTION_OUTPUT_AUDIT.md` 已补充修复后复核章节，明确第 1-16 节为 2026-06-06 修复前快照，第 17 节为 2026-06-07 修复后结论。
+- `Subscription-Userinfo` 保留真实 `expire=<用户 expire_at Unix 秒>`。
+- 当前系统不统计真实流量，继续不返回虚假的 `upload/download/total`。
+- `Profile-Title` 与 `Profile-Update-Interval: 24` 已在 active target 响应头复核通过。
+- target 文件后缀与 Content-Type 已在 active 用户五个目标上复核通过。
+- `target=ss` active 正文为 Base64，解码后首节点 fragment 为 URL 百分号编码，decode 后中文正常且无 mojibake。
+- 本轮未新增、清空或删除数据库数据；当前没有可复用的非 active 测试用户，因此非 active `target=ss` 结论沿用上一轮已通过验收：200 空正文、不返回明文中文提示、不泄露节点。
+
+## File Changes In This Round
+
+- Updated: `docs/SUBSCRIPTION_OUTPUT_AUDIT.md`
+- Updated: `docs/TASK_STATE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' .codex/skills/subscription-manager-project/SKILL.md`
+- `find . -name subscription_manager_dev_task.md -o -path './references/project-rules.md'`
+- `npm run build --prefix backend`
+- `npm run build --prefix frontend`
+- `curl -sS -L -A 'Clash' -D "/tmp/sub-release-check/sub-${target}.headers" -o "/tmp/sub-release-check/sub-${target}.body" "http://127.0.0.1:8084/sub/{masked-token}?target=${target}"`
+- `node` 临时脚本验证 `target=ss` Base64、解码行数、fragment 百分号编码、decode 后文案和 mojibake 缺失。
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up。
+- `subscription-manager-caddy`: Up，端口 `0.0.0.0:8084->80/tcp`。
+- `subscription-manager-mongodb`: Up，healthy。
+- `subscription-manager-redis`: Up，healthy。
+- `subscription_manager_subconverter`: Up。
+- 未清空数据库，未删除 volume，未执行 `docker system prune`，未执行 NAS 重启。
+
+## API/Interface Status
+
+- active `target=clash`: `.yaml`，`Content-Type: text/plain; charset=utf-8`，`Profile-Title: test0003_云域数字`，`Profile-Update-Interval: 24`，`Subscription-Userinfo: expire=1781971199`。
+- active `target=mihomo`: `.yaml`，`Content-Type: text/plain; charset=utf-8`，同样返回 profile headers 与真实 expire。
+- active `target=ss`: `.txt`，`Content-Type: text/plain; charset=utf-8`，Base64 正文，解码后 63 行，首节点名称 URL decode 后为 `📌 V26.6.104｜到期 2026-06-20｜节点`，`hasMojibake=false`。
+- active `target=shadowrocket`: `.txt`，`Content-Type: text/plain; charset=utf-8`，Base64 正文。
+- active `target=sing-box`: `.json`，`Content-Type: application/json; charset=utf-8`。
+- active 五个 target 均未返回 `upload/download/total`。
+
+## Validation Result
+
+- backend build: pass。
+- frontend build: pass。
+- active 五 target 响应头复核: pass。
+- `target=ss` Base64 与节点名编码复核: pass。
+- `docs/SUBSCRIPTION_OUTPUT_AUDIT.md` 修复后状态复核: pass。
+- P0/P1: 当前未发现。
+
+## Notes / Blockers
+
+- `subscription_manager_dev_task.md` 与 `references/project-rules.md` 当前仓库未找到；本轮按 AGENTS、用户任务与审查文档执行。
+- 本轮没有运行 `scripts/nas-release.sh`；发布前复核使用已运行的 build、接口检查与当前 Docker 状态。
+
+## Next Step
+
+- 提交当前修复，创建 2026-06-07 发布 tag，并推送 `master` 与 tag 到 `origin`。

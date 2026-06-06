@@ -71,9 +71,9 @@
           <small>会通过 subconverter 的 config 参数传入，用于生成 Clash 策略组和规则。</small>
         </label>
         <label><span class="label-title">订阅文件名模板 <em class="req">*</em></span>
-          <input id="settings-subscription-filename-template" name="settingsSubscriptionFilenameTemplate" v-model="form.subscription_filename_template" placeholder="{{username}}_V{{version}}" :class="{ 'is-error': !!fieldError.subscription_filename_template }" @focus="clearFieldError('subscription_filename_template')" />
+          <input id="settings-subscription-filename-template" name="settingsSubscriptionFilenameTemplate" v-model="form.subscription_filename_template" placeholder="{{username}}_云域数字" :class="{ 'is-error': !!fieldError.subscription_filename_template }" @focus="clearFieldError('subscription_filename_template')" />
           <small v-if="fieldError.subscription_filename_template" class="error-text">{{ fieldError.subscription_filename_template }}</small>
-          <small>可用占位符：<code v-pre>{{username}}</code>、<code v-pre>{{target}}</code>、<code v-pre>{{expire}}</code>、<code v-pre>{{version}}</code>。例如 <code v-pre>{{username}}_V{{version}}</code>。</small>
+          <small>可用占位符：<code v-pre>{{username}}</code>、<code v-pre>{{target}}</code>、<code v-pre>{{expire}}</code>、<code v-pre>{{version}}</code>。例如 <code v-pre>{{username}}_云域数字</code>。</small>
         </label>
         <label><span class="label-title">自动轮询间隔（分钟） <em class="req">*</em></span>
           <input id="settings-upstream-poll-interval" name="settingsUpstreamPollInterval" v-model.number="form.upstream_poll_interval_minutes" type="number" min="0" :class="{ 'is-error': !!fieldError.upstream_poll_interval_minutes }" @focus="clearFieldError('upstream_poll_interval_minutes')" />
@@ -213,7 +213,7 @@ const form = reactive<Settings & {
   converter_backend_url: defaultConverterBackendUrl,
   converter_default_target: 'clash',
   converter_default_config_url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Full.ini',
-  subscription_filename_template: '{{username}}_V{{version}}',
+  subscription_filename_template: '{{username}}_云域数字',
   upstream_poll_interval_minutes: 60,
   upstream_fetch_proxy_url: defaultUpstreamFetchProxyUrl,
   sub_rate_limit_per_minute: 60,
@@ -282,7 +282,7 @@ async function save() {
         : defaultConverterBackendUrl,
       converter_default_target: String(form.converter_default_target || '').trim(),
       converter_default_config_url: String(form.converter_default_config_url || '').trim(),
-      subscription_filename_template: String(form.subscription_filename_template || '').trim() || '{{username}}_V{{version}}',
+      subscription_filename_template: String(form.subscription_filename_template || '').trim() || '{{username}}_云域数字',
       upstream_poll_interval_minutes: Math.max(0, Number(form.upstream_poll_interval_minutes) || 0),
       upstream_fetch_proxy_url: String(form.upstream_fetch_proxy_url || defaultUpstreamFetchProxyUrl).trim(),
       sub_rate_limit_per_minute: Math.max(1, Number(form.sub_rate_limit_per_minute) || 1),
