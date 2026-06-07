@@ -1,10 +1,29 @@
+import { clearBootMeCache } from "./auth-cache";
+import { redirectToLogin } from "./auth-navigation";
+
 function normalizeBaseUrl(value: string | undefined) {
   const trimmed = String(value || "").trim();
   if (!trimmed) return "";
   return trimmed.replace(/\/+$/, "");
 }
 
-export const API_BASE = normalizeBaseUrl(import.meta.env.VITE_APP_BASE_URL) || window.location.origin;
+const configuredApiBase = normalizeBaseUrl(import.meta.env.VITE_APP_BASE_URL);
+
+export const API_BASE =
+  import.meta.env.DEV && configuredApiBase ? configuredApiBase : window.location.origin;
+
+function contentType(resp: Response) {
+  return String(resp.headers.get("content-type") || "").toLowerCase();
+}
+
+function isHtmlResponse(resp: Response) {
+  return contentType(resp).includes("text/html");
+}
+
+function refreshCurrentPage() {
+  const current = `${window.location.pathname}${window.location.search}`;
+  window.location.replace(current || "/");
+}
 
 export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -12,11 +31,34 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
     headers: { "Content-Type": "application/json" },
     ...init
   });
+  if (resp.status === 401) {
+    clearBootMeCache();
+    redirectToLogin();
+    return new Promise<T>(() => undefined);
+  }
+  if (resp.status === 403 && window.location.pathname.startsWith("/admin")) {
+    clearBootMeCache();
+    window.location.replace("/dashboard");
+    return new Promise<T>(() => undefined);
+  }
+  if (isHtmlResponse(resp)) {
+    refreshCurrentPage();
+    return new Promise<T>(() => undefined);
+  }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     throw new Error(data.message || `HTTP ${resp.status}`);
   }
   return data as T;
+}
+
+export function redirectOnUnauthorizedStatus(status: number) {
+  if (status === 401) {
+    clearBootMeCache();
+    redirectToLogin();
+    return true;
+  }
+  return false;
 }
 
 export function fmtDate(value: string | null | undefined) {

@@ -6,31 +6,6 @@ import { systemStateCol } from "./db.js";
 const SETTINGS_KEY = "runtime_settings";
 const DEFAULT_UPSTREAM_FETCH_PROXY_URL = "http://100.69.223.58:17890";
 
-function boolFromEnvPair(primary: string | undefined, legacy: string | undefined, defaultValue: boolean) {
-  const primaryValue = String(primary || "").trim();
-  if (primaryValue) {
-    return boolFromEnv(primaryValue, defaultValue);
-  }
-  const legacyValue = String(legacy || "").trim();
-  if (legacyValue) {
-    return boolFromEnv(legacyValue, defaultValue);
-  }
-  return defaultValue;
-}
-
-export function buildEffectiveTurnstileSettings(settings: Pick<RuntimeSettings,
-  "turnstile_enabled" | "login_turnstile_enabled" | "register_turnstile_enabled"
->) {
-  const globalEnabled = boolFromEnv(env.TURNSTILE_ENABLED, false) && settings.turnstile_enabled;
-  return {
-    turnstileEnabled: globalEnabled,
-    turnstileLoginEnabled:
-      globalEnabled && boolFromEnvPair(env.TURNSTILE_LOGIN_ENABLED, env.LOGIN_TURNSTILE_ENABLED, false) && settings.login_turnstile_enabled,
-    turnstileRegisterEnabled:
-      globalEnabled && boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, false) && settings.register_turnstile_enabled
-  };
-}
-
 const runtimeSettingsSchema = z.object({
   registration_enabled: z.boolean().default(boolFromEnv(env.REGISTRATION_ENABLED, true)),
   converter_backend_url: z.string().default(env.CONVERTER_BACKEND_URL || "http://subconverter:25500/sub"),
@@ -46,13 +21,6 @@ const runtimeSettingsSchema = z.object({
   login_lock_minutes: z.number().int().positive().default(env.LOGIN_LOCK_MINUTES),
   register_ip_limit: z.number().int().positive().default(env.REGISTER_IP_LIMIT),
   register_ip_window_minutes: z.number().int().positive().default(env.REGISTER_IP_WINDOW_MINUTES),
-  turnstile_enabled: z.boolean().default(boolFromEnv(env.TURNSTILE_ENABLED, false)),
-  login_turnstile_enabled: z
-    .boolean()
-    .default(boolFromEnvPair(env.TURNSTILE_LOGIN_ENABLED, env.LOGIN_TURNSTILE_ENABLED, false)),
-  register_turnstile_enabled: z
-    .boolean()
-    .default(boolFromEnvPair(env.TURNSTILE_REGISTER_ENABLED, env.REGISTER_TURNSTILE_ENABLED, false)),
   site_domain: z.string().default(env.APP_BASE_URL)
 });
 

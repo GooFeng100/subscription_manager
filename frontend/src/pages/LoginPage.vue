@@ -20,13 +20,6 @@
         autocomplete="current-password"
         :icon-src="passwordIcon"
       />
-      <TurnstileWidget
-        v-if="turnstileLoginEnabled && turnstileSiteKey"
-        ref="turnstileWidget"
-        v-model="turnstileToken"
-        :site-key="turnstileSiteKey"
-        action="login"
-      />
       <LoadingButton :loading="loading" :disabled="!username || !password" loading-text="登录中..." @click="submit">
         登录
       </LoadingButton>
@@ -41,19 +34,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import AuthLayout from '../components/auth/AuthLayout.vue';
 import FormField from '../components/ui/FormField.vue';
 import LoadingButton from '../components/ui/LoadingButton.vue';
-import TurnstileWidget from '../components/auth/TurnstileWidget.vue';
 import { api } from '../lib/api';
 import { postAuthJson } from '../lib/auth-request';
-import { getPublicConfig } from '../lib/public-config';
+import { getHomePath } from '../lib/auth-navigation';
 import usernameIcon from '../assets/icons/username.png';
 import passwordIcon from '../assets/icons/password.png';
 
-type Me = {
+type Session = {
+  authenticated?: boolean;
   userType?: 'admin' | 'user';
   dashboard?: string;
 };
@@ -64,12 +57,6 @@ const password = ref('');
 const loading = ref(false);
 const msg = ref('');
 const msgType = ref<'ok' | 'err' | ''>('');
-const turnstileLoginEnabled = ref(false);
-const turnstileSiteKey = ref('');
-const turnstileToken = ref('');
-const turnstileWidget = ref<InstanceType<typeof TurnstileWidget> | null>(null);
-
-const turnstileRequired = computed(() => turnstileLoginEnabled.value && Boolean(turnstileSiteKey.value));
 
 function clearMessage() {
   if (!msg.value) return;
@@ -83,22 +70,21 @@ watch([username, password], () => {
   }
 });
 
-async function loadPublicConfig() {
+async function redirectIfAuthenticated() {
   try {
-    const config = await getPublicConfig();
-    turnstileLoginEnabled.value = !!config.turnstileLoginEnabled;
-    turnstileSiteKey.value = String(config.turnstileSiteKey || '').trim();
+    const session = await api<Session>('/api/auth/session');
+    if (session.authenticated && session.userType) {
+      await router.replace(getHomePath(session.userType, session.dashboard));
+    }
   } catch {
-    turnstileLoginEnabled.value = false;
-    turnstileSiteKey.value = '';
+    // No active session, stay on the login page.
   }
 }
 
 async function submit() {
   if (!username.value || !password.value || loading.value) return;
-  if (!username.value.trim()) { msg.value = '请输入用户名'; msgType.value = 'err'; return; }
-  if (turnstileRequired.value && !turnstileToken.value) {
-    msg.value = '请先完成 Turnstile 验证';
+  if (!username.value.trim()) {
+    msg.value = '请输入用户名';
     msgType.value = 'err';
     return;
   }
@@ -107,41 +93,23 @@ async function submit() {
 
   const result = await postAuthJson<{ message?: string; dashboard?: string; userType?: string }>('login', '/api/auth/login', {
     username: username.value.trim(),
-    password: password.value,
-    turnstileToken: turnstileRequired.value ? turnstileToken.value || undefined : undefined
+    password: password.value
   });
   if (!result.ok) {
     msg.value = result.message;
     msgType.value = 'err';
-    if (turnstileRequired.value) {
-      turnstileWidget.value?.resetWidget();
-    }
     loading.value = false;
     return;
   }
 
-  try {
-    const me = await api<Me & { authenticated?: boolean }>('/api/auth/session');
-    if (!me.authenticated) {
-      throw new Error('登录成功，但获取会话失败，请刷新重试');
-    }
-    msg.value = '登录成功，正在跳转...';
-    msgType.value = 'ok';
-    if (me.userType === 'admin') {
-      await router.push('/admin/users');
-    } else {
-      await router.push(me.dashboard || '/dashboard');
-    }
-  } catch {
-    msg.value = '登录成功，但获取用户信息失败，请刷新重试';
-    msgType.value = 'err';
-  } finally {
-    loading.value = false;
-  }
+  msg.value = '登录成功，正在跳转...';
+  msgType.value = 'ok';
+  await router.replace(getHomePath(result.data.userType as 'admin' | 'user' | undefined, result.data.dashboard));
+  loading.value = false;
 }
 
 onMounted(() => {
-  void loadPublicConfig();
+  void redirectIfAuthenticated();
 });
 </script>
 

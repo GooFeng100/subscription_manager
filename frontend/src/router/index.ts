@@ -12,7 +12,8 @@ import AdminUpstreamsPage from "../pages/AdminUpstreamsPage.vue";
 import AdminRotationPage from "../pages/AdminRotationPage.vue";
 import AdminSettingsPage from "../pages/AdminSettingsPage.vue";
 import AdminLogsPage from "../pages/AdminLogsPage.vue";
-import { setBootMeCache } from "../lib/auth-cache";
+import { setBootMeCache, takeBootMeCache } from "../lib/auth-cache";
+import { getHomePath, redirectToLogin } from "../lib/auth-navigation";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -48,7 +49,8 @@ type Me = {
 
 function clearAuthAndLogin() {
   setBootMeCache(null);
-  return "/login";
+  redirectToLogin();
+  return false;
 }
 
 router.beforeEach(async (to) => {
@@ -57,21 +59,26 @@ router.beforeEach(async (to) => {
   }
 
   if (publicPaths.has(to.path)) {
-    // Public pages should not trigger session checks on forced refresh,
-    // avoiding unnecessary noise in browser console.
+    const cached = takeBootMeCache();
+    if (cached?.userType) {
+      return getHomePath(cached.userType, cached.dashboard);
+    }
     return true;
   }
 
-  let me: Me | null = null;
+  const cached = takeBootMeCache();
+  let me: Me | null = cached ? { ...cached } : null;
   try {
-    const resp = await fetch("/api/auth/me", { credentials: "include" });
-    if (resp.status === 401) {
-      return clearAuthAndLogin();
+    if (!me) {
+      const resp = await fetch("/api/auth/me", { credentials: "include" });
+      if (resp.status === 401) {
+        return clearAuthAndLogin();
+      }
+      if (!resp.ok) {
+        return clearAuthAndLogin();
+      }
+      me = (await resp.json()) as Me;
     }
-    if (!resp.ok) {
-      return clearAuthAndLogin();
-    }
-    me = (await resp.json()) as Me;
   } catch {
     return clearAuthAndLogin();
   }

@@ -68,9 +68,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { useRouter } from "vue-router";
 import { API_BASE, api, fmtDateOnly } from "../lib/api";
 import { takeBootMeCache } from "../lib/auth-cache";
+import { redirectToLogin } from "../lib/auth-navigation";
 import UserMobileLayout from "../components/user/UserMobileLayout.vue";
 
 type Me = {
@@ -100,7 +100,6 @@ const resetting = ref(false);
 const resetConfirmOpen = ref(false);
 const subInput = ref<HTMLInputElement | null>(null);
 let copyTimer: ReturnType<typeof setTimeout> | null = null;
-const router = useRouter();
 
 const subUrl = computed(() => {
   if (!me.value?.sub_token) return "当前账号未激活，暂无订阅链接";
@@ -154,7 +153,8 @@ async function refresh() {
     } else {
       const session = await api<Me & { authenticated?: boolean }>("/api/auth/session");
       if (!session.authenticated) {
-        throw new Error("未登录");
+        redirectToLogin();
+        return;
       }
       me.value = session;
     }
@@ -250,7 +250,7 @@ async function resetToken() {
 async function logout() {
   try {
     await api("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
-    await router.push("/login");
+    redirectToLogin();
   } catch (e) {
     msg.value = (e as Error).message;
     error.value = true;

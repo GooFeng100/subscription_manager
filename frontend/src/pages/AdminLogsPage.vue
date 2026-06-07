@@ -240,10 +240,6 @@ function logMessageLabel(message: string) {
     'login locked by rate limit': '登录失败次数过多，请稍后再试',
     'register ip limit exceeded': '注册过于频繁，请稍后再试',
     'username already exists': '用户名已存在',
-    'Turnstile token required': '请完成 Turnstile 验证',
-    'Turnstile secret key not configured': 'Turnstile 密钥未配置',
-    'Turnstile verification failed': 'Turnstile 验证失败',
-    'Turnstile request error': 'Turnstile 验证请求失败'
   };
   return labels[message] || message || '-';
 }

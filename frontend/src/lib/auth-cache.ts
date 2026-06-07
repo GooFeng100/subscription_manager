@@ -15,6 +15,10 @@ export function setBootMeCache(me: MeBrief | null) {
   bootMeCache = me;
 }
 
+export function clearBootMeCache() {
+  bootMeCache = null;
+}
+
 export function takeBootMeCache() {
   const value = bootMeCache;
   bootMeCache = null;

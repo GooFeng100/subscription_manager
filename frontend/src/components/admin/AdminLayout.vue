@@ -39,6 +39,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import { api } from '../../lib/api';
+import { redirectToLogin } from '../../lib/auth-navigation';
 import markIcon from '../../assets/icons/mark.png';
 
 const router = useRouter();
@@ -49,7 +50,11 @@ const userInitial = computed(() => (username.value ? username.value[0].toUpperCa
 onMounted(async () => {
   try {
     const me = await api<{ authenticated?: boolean; username?: string }>('/api/auth/session');
-    username.value = me.authenticated ? (me.username || '') : '';
+    if (!me.authenticated) {
+      redirectToLogin();
+      return;
+    }
+    username.value = me.username || '';
   } catch {
     username.value = '';
   }

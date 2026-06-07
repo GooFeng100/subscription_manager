@@ -871,7 +871,7 @@ router.post("/redeem", requireUser, async (req, res) => {
   const userId = new ObjectId(req.session.userId);
   const user = await usersCol().findOne({ _id: userId });
   if (!user) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ error: "UNAUTHORIZED", message: "请先登录" });
   }
 
   const now = new Date();
