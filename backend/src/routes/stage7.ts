@@ -24,9 +24,6 @@ const settingsUpdateSchema = z.object({
   login_lock_minutes: z.number().int().positive().optional(),
   register_ip_limit: z.number().int().positive().optional(),
   register_ip_window_minutes: z.number().int().positive().optional(),
-  turnstile_enabled: z.boolean().optional(),
-  login_turnstile_enabled: z.boolean().optional(),
-  register_turnstile_enabled: z.boolean().optional(),
   site_domain: z.string().optional()
 });
 

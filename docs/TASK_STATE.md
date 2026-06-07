@@ -2,6 +2,203 @@
 
 ## Date
 
+2026-06-07
+
+## Round Goal
+
+在已移除 Turnstile 的版本上补强 Cloudflare 前置 Challenge 兼容性、统一 401/HTML 兜底处理、再审视接口权限和最小限流，并清理构建产物。
+
+## Project Current Status
+
+- 前端登录/注册已保持纯账号密码流程，不恢复任何站内验证码组件。
+- 前端 API 封装已补上 401 真实跳转、403 管理页回跳、HTML 响应兜底刷新。
+- 生产环境前端 API 基址已改为始终跟随当前页面来源，避免 Tailscale / 局域网切换后请求旧 LAN 地址。
+- 后端登录/注册继续使用现有登录失败锁定与注册 IP 频控，未引入依赖 Cloudflare 的逻辑。
+- `frontend/tsconfig.tsbuildinfo` 已清理，避免构建缓存污染工作区。
+
+## File Changes In This Round
+
+- Updated: `frontend/src/lib/api.ts`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `docs/TASK_STATE.md`
+- Deleted: `frontend/tsconfig.tsbuildinfo`
+
+## Commands Executed In This Round
+
+- `sed -n '1,240p' /home/admin/.codex/attachments/80303c63-a8f3-4065-842e-83a6a6cb7dff/pasted-text.txt`
+- `git status --short`
+- `sed -n '1,220p' frontend/src/lib/api.ts`
+- `sed -n '1,220p' frontend/src/lib/auth-request.ts`
+- `sed -n '1,240p' frontend/src/router/index.ts`
+- `sed -n '1,200p' frontend/src/components/admin/AdminLayout.vue`
+- `sed -n '1,120p' frontend/src/pages/DashboardPage.vue`
+- `sed -n '1,220p' backend/src/middleware/require-role.ts`
+- `sed -n '1,220p' backend/src/services/login-guard.ts`
+- `sed -n '1,220p' backend/src/services/register-guard.ts`
+- `sed -n '1,160p' backend/src/routes/auth.ts`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `frontend/`
+- `docker compose up -d --build caddy`
+- `curl -i -sS http://100.69.223.58:8084/config`
+- `curl -i -sS -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123456"}' http://100.69.223.58:8084/api/auth/login`
+- `grep -Rni "appBaseUrl" frontend/src backend/src`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `POST http://100.69.223.58:8084/api/auth/login`: 200 OK，管理员登录成功，说明当前来源下的 API 请求可正常到达 NAS 服务
+- `GET http://100.69.223.58:8084/config`: 200 OK，当前仅返回 `appBaseUrl` 与 `nodeEnv`
+- 401 业务接口会触发真实页面跳转到 `/login`
+- 403 管理页会回跳到 `/dashboard`
+- `text/html` 响应会触发保守刷新兜底，避免前端把 Cloudflare 挑战页当 JSON 解析
+
+## Validation Result
+
+- `frontend` typecheck: pass
+- `frontend` build: pass
+- `caddy` rebuild: pass
+- `100.69.223.58:8084` 登录连通性: pass
+
+## Notes / Blockers
+
+- `GET /config` 仍保留环境里的 `appBaseUrl=http://192.168.10.3:8084`，但前端 API 已不再依赖该值，实际请求按当前页面来源发出。
+- 无已知阻塞。
+
+## Next Step
+
+- 如果你还想继续，我可以再把帮助页/管理页的 403 提示文案收敛成更统一的跳转体验。
+
+# TASK_STATE
+
+## Date
+
+2026-06-07
+
+## Round Goal
+
+弃用站内 Turnstile / Cloudflare challenge 组件，改为 Cloudflare WAF 前置 Managed Challenge + 后端鉴权兜底，并修正未登录/登录态过期后的真实跳转与接口权限响应。
+
+## Project Current Status
+
+- 前端登录、注册页面已移除站内 Turnstile 组件和脚本加载逻辑。
+- 后端登录、注册接口已移除 Turnstile token 接收与校验逻辑，`/config` 不再返回任何 Turnstile 字段。
+- 路由守卫与 `api()` 统一在 401 时清理缓存并 `window.location.replace('/login')`，避免停留在原页面显示未授权错误。
+- 后端鉴权中间件已改为 401 登录态缺失、403 普通用户访问管理员接口。
+- Cloudflare 前置挑战规则与接口分级说明已补充到新文档。
+- 前端 API 基址已修正为生产环境始终跟随当前页面来源，避免 Tailscale / 域名切换后仍请求旧的局域网地址。
+
+## File Changes In This Round
+
+- Updated: `.env.example`
+- Updated: `.env.production.example`
+- Updated: `backend/.env.example`
+- Updated: `backend/src/config/env.ts`
+- Updated: `backend/src/index.ts`
+- Updated: `backend/src/lib/runtime-settings.ts`
+- Updated: `backend/src/middleware/require-role.ts`
+- Updated: `backend/src/routes/auth.ts`
+- Updated: `backend/src/routes/stage2.ts`
+- Updated: `backend/src/routes/stage7.ts`
+- Deleted: `backend/src/services/turnstile.ts`
+- Deleted: `frontend/src/components/auth/TurnstileWidget.vue`
+- Updated: `frontend/src/components/admin/AdminLayout.vue`
+- Updated: `frontend/src/lib/api.ts`
+- Updated: `frontend/src/lib/auth-cache.ts`
+- Added: `frontend/src/lib/auth-navigation.ts`
+- Updated: `frontend/src/lib/auth-request.ts`
+- Updated: `frontend/src/lib/public-config.ts`
+- Updated: `frontend/src/pages/AdminLogsPage.vue`
+- Updated: `frontend/src/pages/AdminSettingsPage.vue`
+- Updated: `frontend/src/pages/AdminUpstreamsPage.vue`
+- Updated: `frontend/src/pages/DashboardPage.vue`
+- Updated: `frontend/src/pages/HelpPage.vue`
+- Updated: `frontend/src/pages/LoginPage.vue`
+- Updated: `frontend/src/pages/RegisterPage.vue`
+- Updated: `frontend/src/router/index.ts`
+- Added: `docs/CLOUDFLARE_FRONT_CHALLENGE.md`
+
+## Commands Executed In This Round
+
+- `sed -n '1,200p' /home/admin/.codex/attachments/a209e19d-a5d9-474e-9929-595c26c707ff/pasted-text.txt`
+- `sed -n '200,400p' /home/admin/.codex/attachments/a209e19d-a5d9-474e-9929-595c26c707ff/pasted-text.txt`
+- `sed -n '400,520p' /home/admin/.codex/attachments/a209e19d-a5d9-474e-9929-595c26c707ff/pasted-text.txt`
+- `sed -n '1,220p' AGENTS.md`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `find backend/src frontend/src docs -type f | sort`
+- `grep -RniE "turnstile|cf-turnstile|siteverify|challenges\\.cloudflare\\.com|captcha|challenge|TURNSTILE" backend/src frontend/src docs .env.example .env.production.example backend/.env.example`
+- `npm run typecheck` in `backend/`
+- `npm run typecheck` in `frontend/`
+- `npm run build` in `backend/`
+- `npm run build` in `frontend/`
+- `npm run typecheck` in `frontend/` after the Tailscale API base fix
+- `npm run build` in `frontend/` after the Tailscale API base fix
+- `docker compose up -d --build caddy`
+- `docker compose up -d --build app caddy`
+- `curl -sS -c /tmp/sm_admin.cookies -H 'Content-Type: application/json' -d '{"username":"admin","password":"admin123456"}' http://127.0.0.1:8084/api/auth/login`
+- `curl -sS -b /tmp/sm_admin.cookies -H 'Content-Type: application/json' -d '{"username":"CodexUser20260607","password":"Password12345","expire_at":"2026-06-08"}' http://127.0.0.1:8084/api/admin/users`
+- `curl -sS -c /tmp/sm_user.cookies -H 'Content-Type: application/json' -d '{"username":"CodexUser20260607","password":"Password12345"}' http://127.0.0.1:8084/api/auth/login`
+- `curl -i -sS http://127.0.0.1:8084/health`
+- `curl -i -sS http://127.0.0.1:8084/config`
+- `curl -i -sS http://127.0.0.1:8084/api/auth/me`
+- `curl -i -sS http://127.0.0.1:8084/api/admin/users`
+- `curl -i -sS http://127.0.0.1:8084/api/internal/converter-source/test`
+- `curl -I -sS 'http://127.0.0.1:8084/sub/D5FamvK7Vg?target=clash'`
+- `curl -i -sS -b /tmp/sm_user.cookies http://127.0.0.1:8084/api/admin/users`
+- `grep -Rni "turnstile\\|cf-turnstile\\|siteverify\\|challenges\\.cloudflare\\.com" backend/src frontend/src`
+- `grep -Rni "turnstile\\|cf-turnstile\\|siteverify\\|challenges\\.cloudflare\\.com" backend/dist frontend/dist`
+- `docker compose ps`
+- `curl -sS -b /tmp/sm_admin.cookies -X DELETE http://127.0.0.1:8084/api/admin/users/6a24cdab649944d8660aff1c`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: running
+- `subscription-manager-caddy`: running
+- `subscription-manager-mongodb`: running
+- `subscription-manager-redis`: running
+- `subscription_manager_subconverter`: running
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /config`: 200 OK, only returns `appBaseUrl` and `nodeEnv`
+- `GET /api/auth/me` without cookie: 401 JSON `{"error":"UNAUTHORIZED","message":"请先登录"}`
+- `GET /api/admin/users` without cookie: 401 JSON `{"error":"UNAUTHORIZED","message":"请先登录"}`
+- `GET /api/admin/users` with ordinary user session: 403 JSON `{"error":"FORBIDDEN","message":"无权限访问"}`
+- `GET /api/internal/converter-source/test` without secret: 403 plain text `forbidden`
+- `GET /sub/D5FamvK7Vg?target=clash`: 200 OK subscription payload returned for an active test user
+- 登录页和注册页已不再渲染 Turnstile，也不再请求 `challenges.cloudflare.com`
+- 登录态失效时，前端通过真实 `window.location.replace('/login')` 跳转
+
+## Validation Result
+
+- `backend` typecheck: pass
+- `frontend` typecheck: pass
+- `backend` build: pass
+- `frontend` build: pass
+- `frontend` typecheck/build after API base fix: pass
+- Docker rebuild for `app` and `caddy`: pass
+- API checks: pass
+
+## Notes / Blockers
+
+- 为验证 403 普通用户路径，临时创建并登录了一个普通测试用户，随后已删除该用户记录，避免长期残留测试数据。
+- 无已知阻塞。
+
+## Next Step
+
+- 如需发布，可继续执行打包/推送流程；当前代码与容器验证已完成。
+
+# TASK_STATE
+
+## Date
+
 2026-06-06
 
 ## Round Goal

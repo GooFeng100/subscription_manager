@@ -11,7 +11,7 @@ import stage6Router from "./routes/stage6.js";
 import stage7Router from "./routes/stage7.js";
 import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
-import { buildEffectiveTurnstileSettings, getRuntimeSettings } from "./lib/runtime-settings.js";
+import { getRuntimeSettings } from "./lib/runtime-settings.js";
 import { startUpstreamAutoPolling } from "./services/upstream-poller.js";
 import { startActivationCodeExpiryJob } from "./services/activation-code-expiry.js";
 
@@ -73,14 +73,9 @@ async function bootstrap() {
 
   app.get("/config", async (_req, res) => {
     const settings = await getRuntimeSettings();
-    const turnstile = buildEffectiveTurnstileSettings(settings);
     res.json({
       appBaseUrl: settings.site_domain || env.APP_BASE_URL,
-      nodeEnv: env.NODE_ENV,
-      turnstileEnabled: turnstile.turnstileEnabled,
-      turnstileSiteKey: env.TURNSTILE_SITE_KEY || "",
-      turnstileLoginEnabled: turnstile.turnstileLoginEnabled,
-      turnstileRegisterEnabled: turnstile.turnstileRegisterEnabled
+      nodeEnv: env.NODE_ENV
     });
   });
 

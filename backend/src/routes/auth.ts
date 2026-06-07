@@ -4,9 +4,8 @@ import { z } from "zod";
 import { ObjectId } from "mongodb";
 import { env } from "../config/env.js";
 import { adminsCol, usersCol } from "../lib/db.js";
-import { generateSubToken, boolFromEnv } from "../lib/utils.js";
+import { generateSubToken } from "../lib/utils.js";
 import { clearLoginFail, isLoginLocked, recordLoginFail } from "../services/login-guard.js";
-import { verifyTurnstile } from "../services/turnstile.js";
 import { checkRegisterIpLimit, recordRegisterIp } from "../services/register-guard.js";
 import { writeAuthLog } from "../services/auth-log.js";
 import { requireAdmin, requireAuth, requireUser } from "../middleware/require-role.js";
@@ -26,13 +25,11 @@ const usernameSchema = z
 
 const userAuthSchema = z.object({
   username: usernameSchema,
-  password: z.string().min(8).max(128),
-  turnstileToken: z.string().optional()
+  password: z.string().min(8).max(128)
 });
 const loginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(128),
-  turnstileToken: z.string().optional()
+  password: z.string().min(1).max(128)
 });
 const changePasswordSchema = z.object({
   oldPassword: z.string().min(8).max(128),
@@ -80,7 +77,7 @@ router.post("/register", async (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid request payload" });
   }
-  const { username, password, turnstileToken } = parsed.data;
+  const { username, password } = parsed.data;
   const ip = clientIp(req.ip);
   const ua = userAgent(req.get("user-agent"));
   const ipAllowed = await checkRegisterIpLimit(ip);
@@ -108,19 +105,6 @@ router.post("/register", async (req, res) => {
       message: "username conflicts with admin username"
     });
     return res.status(409).json({ message: "Username already exists" });
-  }
-
-  const turnstile = await verifyTurnstile("register", turnstileToken);
-  if (!turnstile.ok) {
-    await writeAuthLog({
-      username: trimmedUsername,
-      ip,
-      userAgent: ua,
-      action: "register",
-      success: false,
-      message: turnstile.message || "turnstile failed"
-    });
-    return res.status(400).json({ error: turnstile.error, message: turnstile.message });
   }
 
   const exists = await usersCol().findOne({ username: trimmedUsername });
@@ -168,7 +152,7 @@ router.post("/login", async (req, res) => {
     return res.json({ ok: false, message: "请输入正确的用户名和密码" });
   }
 
-  const { username, password, turnstileToken } = parsed.data;
+  const { username, password } = parsed.data;
   const normalizedUsername = username.trim();
   if (!normalizedUsername) {
     return res.json({ ok: false, message: "请输入正确的用户名和密码" });
@@ -188,19 +172,6 @@ router.post("/login", async (req, res) => {
       message: "登录失败次数过多，请稍后再试"
     });
     return res.status(429).json({ message: "登录失败次数过多，请稍后再试" });
-  }
-
-  const turnstile = await verifyTurnstile(admin ? "admin_login" : "user_login", turnstileToken);
-  if (!turnstile.ok) {
-    await writeAuthLog({
-      username: normalizedUsername,
-      ip,
-      userAgent: ua,
-      action,
-      success: false,
-      message: turnstile.message || "turnstile failed"
-    });
-    return res.status(400).json({ ok: false, error: turnstile.error, message: turnstile.message });
   }
 
   if (admin) {
@@ -292,7 +263,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
   if (sessionUserType === "admin") {
     const admin = await adminsCol().findOne({ _id: new ObjectId(sessionUserId) });
     if (!admin) {
-      return res.status(401).json({ message: "Unauthorized" });
+      return res.status(401).json({ error: "UNAUTHORIZED", message: "请先登录" });
     }
     const validOld = await bcrypt.compare(oldPassword, admin.password_hash);
     if (!validOld) {
@@ -327,7 +298,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
 
   const user = await usersCol().findOne({ _id: new ObjectId(sessionUserId) });
   if (!user) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ error: "UNAUTHORIZED", message: "请先登录" });
   }
 
   const validOld = await bcrypt.compare(oldPassword, user.password_hash);
@@ -391,7 +362,7 @@ router.get("/me", requireAuth, async (req, res) => {
 
   const user = await usersCol().findOne({ _id: new ObjectId(req.session.userId) });
   if (!user) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ error: "UNAUTHORIZED", message: "请先登录" });
   }
   return res.json(await buildUserSessionView(user as UserDoc & { _id: ObjectId }));
 });

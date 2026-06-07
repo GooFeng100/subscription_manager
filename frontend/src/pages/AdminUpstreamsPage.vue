@@ -154,7 +154,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
-import { API_BASE, api } from '../lib/api';
+import { API_BASE, api, redirectOnUnauthorizedStatus } from '../lib/api';
 
 const UPSTREAMS_POLL_INTERVAL_MS = 5000;
 
@@ -351,6 +351,9 @@ async function runAllTests() {
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' }
     });
+    if (redirectOnUnauthorizedStatus(resp.status)) {
+      return;
+    }
     if (!resp.ok || !resp.body) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.message || `HTTP ${resp.status}`);

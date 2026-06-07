@@ -34,6 +34,7 @@ import { useRouter } from 'vue-router';
 import { marked } from 'marked';
 import { helpArticles } from '../content/help';
 import { api } from '../lib/api';
+import { redirectToLogin } from '../lib/auth-navigation';
 
 type NavGroup = {
   title: string;
@@ -173,10 +174,11 @@ async function goBack() {
       return;
     }
   } catch {
-    // No active session, fall back to the public entry.
+    redirectToLogin();
+    return;
   }
 
-  await router.push('/login');
+  redirectToLogin();
 }
 
 watch(

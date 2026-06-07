@@ -3,7 +3,7 @@
     <div class="head">
       <div>
         <h1>系统设置</h1>
-        <p class="sub">站点参数、风控策略与 Turnstile 配置。</p>
+        <p class="sub">站点参数、风控策略与订阅转换配置。</p>
       </div>
     </div>
 
@@ -26,9 +26,6 @@
           <small v-if="fieldError.sub_rate_limit_per_minute" class="error-text">{{ fieldError.sub_rate_limit_per_minute }}</small>
           <small>限制单用户/单 token 的订阅接口访问频率，避免高频刷新。</small>
         </label>
-      </div>
-      <div class="panel-note">
-        Turnstile 的 Site Key / Secret Key 现在只从环境变量读取，后台不再提供修改入口。修改后需要重启容器生效。
       </div>
     </section>
 
@@ -150,27 +147,6 @@
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head"><h2>Turnstile</h2></div>
-      <div class="panel-body form-grid">
-        <label>
-          启用 Turnstile 总开关
-          <div class="switch-row"><input id="settings-turnstile-enabled" name="settingsTurnstileEnabled" type="checkbox" v-model="form.turnstile_enabled" /><span>{{ form.turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
-          <small>总开关关闭时，登录/注册的子开关将不生效。</small>
-        </label>
-        <label>
-          登录启用
-          <div class="switch-row"><input id="settings-login-turnstile-enabled" name="settingsLoginTurnstileEnabled" type="checkbox" v-model="form.login_turnstile_enabled" /><span>{{ form.login_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
-          <small>控制登录页是否要求通过 Turnstile 验证。</small>
-        </label>
-        <label>
-          注册启用
-          <div class="switch-row"><input id="settings-register-turnstile-enabled" name="settingsRegisterTurnstileEnabled" type="checkbox" v-model="form.register_turnstile_enabled" /><span>{{ form.register_turnstile_enabled ? '已开启' : '已关闭' }}</span></div>
-          <small>控制注册页是否要求通过 Turnstile 验证。</small>
-        </label>
-      </div>
-    </section>
-
     <div class="foot-actions">
       <p class="msg" :class="{ ok: msgType === 'ok', bad: msgType === 'bad' }">{{ msg }}</p>
       <button type="button" @click="load">重新加载</button>
@@ -182,7 +158,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import AdminLayout from '../components/admin/AdminLayout.vue';
-import { API_BASE, api } from '../lib/api';
+import { API_BASE, api, redirectOnUnauthorizedStatus } from '../lib/api';
 
 type Settings = {
   registration_enabled: boolean;
@@ -197,9 +173,6 @@ type Settings = {
   login_lock_minutes: number;
   register_ip_limit: number;
   register_ip_window_minutes: number;
-  turnstile_enabled: boolean;
-  login_turnstile_enabled: boolean;
-  register_turnstile_enabled: boolean;
   site_domain: string;
 };
 
@@ -221,9 +194,6 @@ const form = reactive<Settings & {
   login_lock_minutes: 15,
   register_ip_limit: 10,
   register_ip_window_minutes: 60,
-  turnstile_enabled: false,
-  login_turnstile_enabled: false,
-  register_turnstile_enabled: false,
   site_domain: '',
   use_custom_converter_backend_url: false
 });
@@ -290,9 +260,6 @@ async function save() {
       login_lock_minutes: Math.max(1, Number(form.login_lock_minutes) || 1),
       register_ip_limit: Math.max(1, Number(form.register_ip_limit) || 1),
       register_ip_window_minutes: Math.max(1, Number(form.register_ip_window_minutes) || 1),
-      turnstile_enabled: !!form.turnstile_enabled,
-      login_turnstile_enabled: !!form.login_turnstile_enabled,
-      register_turnstile_enabled: !!form.register_turnstile_enabled,
       site_domain: String(form.site_domain || '').trim()
     };
     // site_domain is environment-driven and displayed as read-only.
@@ -347,6 +314,9 @@ async function testUpstreamProxy() {
         timeoutMs: 10000
       })
     });
+    if (redirectOnUnauthorizedStatus(resp.status)) {
+      return;
+    }
     const res = await resp.json().catch(() => ({}));
     proxyTestSummary.value = res.ok
       ? `代理连通正常 · HTTP 状态：${res.httpStatus || 200} · 耗时：${res.elapsedMs || 0} ms`
