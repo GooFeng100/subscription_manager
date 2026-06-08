@@ -7,16 +7,28 @@ For the full end-to-end deployment and maintenance workflow, treat [`docs/FINAL_
 ## 1. NAS local deployment
 
 Use `compose.yaml` in the NAS visual compose UI or from CLI.
-This repository treats `compose.yaml` as the only authoritative Docker Compose file.
+This repository treats `compose.yaml` as the authoritative local split Docker Compose file.
 `docker-compose.yml` is a historical leftover and should not be used for deployment.
 
 - Base URL: `http://192.168.10.3:8084`
 - Exposed port: `8084`
 - Internal services:
+  - `web`
   - `app`
-  - `caddy`
-  - `mongodb`
-  - `redis`
+  - `subconverter`
+
+The split model is:
+
+- `gateway-caddy`: pure reverse proxy only
+- `shared-data`: shared MongoDB + Redis only
+- `subscription-manager`: business app only (`web`, `app`, `subconverter`)
+
+The `web` container uses `frontend/Dockerfile` and Nginx to serve `frontend/dist`.
+The `app` service name stays `app` for compatibility with existing internal references.
+The `subconverter` service name stays `subconverter`.
+The MongoDB and Redis service names inside `shared-data` stay `mongodb` and `redis`.
+
+The shared MongoDB and Redis stack now lives in the separate `shared-data` project, and the public reverse proxy lives in the separate `gateway-caddy` project.
 
 Recommended commands:
 
@@ -101,3 +113,8 @@ For NAS local deployment, the entry point should be:
 ```text
 http://192.168.10.3:8084
 ```
+
+## Legacy files
+
+- `compose.legacy.yaml` is kept only as a historical snapshot of the pre-split stack
+- It should not be treated as an authority for current local deployment

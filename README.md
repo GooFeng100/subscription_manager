@@ -2,6 +2,7 @@
 
 Stage 0 scaffold for the subscription aggregation authorization distribution system.
 Stage 1 auth foundation is now available in backend APIs.
+The local split now uses three projects: `gateway-caddy`, `shared-data`, and `subscription-manager`.
 
 ## Directory layout
 
@@ -9,7 +10,7 @@ Stage 1 auth foundation is now available in backend APIs.
 - `frontend/`: Vue 3 + Vite + TypeScript frontend scaffold
 - `caddy/`: Caddy reverse proxy config
 - `docker/`: reserved deployment files
-- `compose.yaml`: the only authoritative Docker Compose file
+- `compose.yaml`: authoritative local split Compose file for `subscription-manager`
 - `docker-compose.yml`: historical leftover, not used for deployment
 
 The admin settings page can configure an optional **upstream fetch proxy address** for server-side upstream pulls. The default value is `http://100.69.223.58:17890`. That setting overrides `UPSTREAM_FETCH_PROXY_URL` from the environment; the env var remains a fallback only.
@@ -30,17 +31,22 @@ Frontend local dev uses `VITE_APP_BASE_URL` in `frontend/.env`.
 
 ## Start on NAS (visual compose UI)
 
-The NAS UI usually auto-loads `compose.yaml`. This file is ready for build and run.
-It is the only authoritative compose file for this project.
+The NAS UI usually auto-loads `compose.yaml`. This file now only defines the business app stack:
+
+- `web`
+- `app`
+- `subconverter`
+
+It expects `gateway-caddy` and `shared-data` to be running separately.
 
 `docker-compose.yml` is kept only as a historical artifact and should not be used for deployment.
+`compose.legacy.yaml` is also kept only as a historical snapshot of the pre-split stack.
 
 Expected services:
 
+- `web` (Nginx static frontend)
 - `app` (builds from `backend/Dockerfile`)
-- `caddy` (exposes `8084`)
-- `mongodb`
-- `redis`
+- `subconverter`
 
 For cloud-server deployment, the production files live outside Git under `/opt/apps/subscription-manager/`.
 The final deployment and maintenance runbook is [`docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md`](docs/FINAL_CLOUD_DEPLOYMENT_RUNBOOK.md).
@@ -59,6 +65,10 @@ See:
 cp .env.example .env
 docker compose -f compose.yaml up -d --build
 ```
+
+For the split local workflow, see [`docs/LOCAL_SPLIT_RUNBOOK.md`](docs/LOCAL_SPLIT_RUNBOOK.md).
+
+For the final local verification step, see [`scripts/local-split-verify.sh`](scripts/local-split-verify.sh).
 
 `.env.production.example` is only a repository template. For cloud production, the real file should live outside Git at:
 

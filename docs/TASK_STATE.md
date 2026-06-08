@@ -2,6 +2,295 @@
 
 ## Date
 
+2026-06-09
+
+## Round Goal
+
+整理本地拆分文档、完成最终验收脚本、做 Git 提交前检查，确保没有真实 token、`.env`、备份 archive 或数据目录被错误纳入 Git。
+
+## Project Current Status
+
+- 已完成本地三项目拆分的文档收尾。
+- 已新增最终验收脚本 `scripts/local-split-verify.sh`。
+- 已将所有文档中的真实 token 替换为 `<有效token>`。
+- 已补齐 `.gitignore` 的 `.env.*`、`backup/`、`dump/`、`data/`、`logs/`、`*.archive.gz` 等忽略规则。
+- `./scripts/local-split-verify.sh` 已通过，无 token 模式下验证 `/health`、`/config`、容器、网络和端口均成功。
+- 当前没有发现真实 token、已跟踪 `.env`、已跟踪 archive 备份或数据目录进入 Git。
+- 可以进入第 7 步：`shared-data` 和 `gateway-caddy` 的各自 Git 提交前检查。
+
+## File Changes In This Round
+
+- Updated: [README.md](/vol1/1000/docker/subscription_manager/README.md)
+- Updated: [.gitignore](/vol1/1000/docker/subscription_manager/.gitignore)
+- Updated: [docs/SUBSCRIPTION_MANAGER_SPLIT.md](/vol1/1000/docker/subscription_manager/docs/SUBSCRIPTION_MANAGER_SPLIT.md)
+- Updated: [docs/LOCAL_SPLIT_RUNBOOK.md](/vol1/1000/docker/subscription_manager/docs/LOCAL_SPLIT_RUNBOOK.md)
+- Updated: [docs/LOCAL_MONGO_RESTORE.md](/vol1/1000/docker/subscription_manager/docs/LOCAL_MONGO_RESTORE.md)
+- Updated: [docs/DEPLOYMENT.md](/vol1/1000/docker/subscription_manager/docs/DEPLOYMENT.md)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+- Added: [scripts/local-split-verify.sh](/vol1/1000/docker/subscription_manager/scripts/local-split-verify.sh)
+
+## Commands Executed In This Round
+
+- `git status --short`
+- `git diff --stat`
+- `git ls-files | grep -E '(^|/)(.env|data|backups|backup|dump|.*\\.archive\\.gz|.*\\.log)$' || true`
+- `grep -nE '^(\\.env|\\.env\\.\\*|!\\.env\\.example|backups/|backup/|dump/|data/|logs/|\\*\\.log|\\*\\.archive\\.gz)$' .gitignore`
+- `grep -RIn --exclude-dir=.git --exclude='*.archive.gz' --exclude='*.log' '<有效token>' . || true`
+- `sed -n '1,260p' docs/SUBSCRIPTION_MANAGER_SPLIT.md`
+- `sed -n '1,260p' docs/LOCAL_SPLIT_RUNBOOK.md`
+- `sed -n '1,260p' docs/LOCAL_MONGO_RESTORE.md`
+- `sed -n '1,240p' docs/DEPLOYMENT.md`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `sed -n '1,240p' compose.yaml`
+- `sed -n '1,240p' README.md`
+- `sed -n '1,240p' backend/Dockerfile`
+- `sed -n '1,240p' frontend/Dockerfile`
+- `sed -n '1,200p' docker/rebuild-frontend.sh`
+- `chmod +x scripts/local-split-verify.sh`
+- `bash -n scripts/local-split-verify.sh`
+- `./scripts/local-split-verify.sh`
+- `git diff -- .gitignore compose.yaml .env.split.example README.md docs scripts backend/Dockerfile frontend/Dockerfile docker/rebuild-frontend.sh`
+- `git diff --stat -- .gitignore compose.yaml README.md docs backend/Dockerfile frontend/Dockerfile docker/rebuild-frontend.sh`
+- `git diff --name-only -- .gitignore compose.yaml README.md docs backend/Dockerfile frontend/Dockerfile docker/rebuild-frontend.sh`
+
+## Docker/Container Status
+
+- `shared-mongo`: running
+- `shared-redis`: running
+- `gateway-caddy`: running
+- `subscription-manager-web`: running
+- `subscription-manager-app`: running
+- `subscription-manager-subconverter`: running
+
+## API/Interface Status
+
+- `GET http://localhost:8084/health`: 200 OK
+- `GET http://localhost:8084/config`: 200 OK
+- `GET http://localhost:8084/sub/<有效token>?target=clash`: not required in final verification script without token
+
+## Validation Result
+
+- `scripts/local-split-verify.sh`: pass
+- sensitive token scan: pass
+- archive/data/.env tracking scan: pass
+- `.gitignore` coverage: pass
+
+## Notes / Blockers
+
+- No blocker remains for local split documentation and pre-commit preparation.
+- Only deliberate next step is checking `shared-data` and `gateway-caddy` repositories if they also need a commit review.
+
+## Next Step
+
+- 进入第 7 步：`shared-data` 和 `gateway-caddy` 各自做 Git 提交前检查。
+
+## Date
+
+2026-06-09
+
+## Round Goal
+
+完成第 5 步：从旧 MongoDB volume 备份 subscription_manager 数据库，恢复到 `shared-mongo`，重启 `subscription-manager-app`，并验证 `/health`、`/config`、`/sub/:token`。
+
+## Project Current Status
+
+- 已确认真实数据位于 `subscription_manager_mongodb_data`，包含 `subscription_manager` 数据库。
+- 已生成备份文件 `backups/subscription_manager_local_20260609_002722.archive.gz`。
+- 已通过 `mongorestore --drop` 将备份恢复到 `shared-mongo`。
+- 已重启 `subscription-manager-app`。
+- `GET /health`、`GET /config` 已恢复为 200。
+- 已登录管理员并执行 `POST /api/admin/upstreams/test-all`，成功把 node pool 填充回 Redis。
+- 已用真实有效 token `<有效token>` 验证 `/sub/:token`，返回 200 并生成订阅内容。
+
+## File Changes In This Round
+
+- Added: [scripts/local-mongo-dump-from-legacy-volume.sh](/vol1/1000/docker/subscription_manager/scripts/local-mongo-dump-from-legacy-volume.sh)
+- Added: [scripts/local-mongo-restore-to-shared.sh](/vol1/1000/docker/subscription_manager/scripts/local-mongo-restore-to-shared.sh)
+- Added: [docs/LOCAL_MONGO_RESTORE.md](/vol1/1000/docker/subscription_manager/docs/LOCAL_MONGO_RESTORE.md)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `docker logs --since=2m subscription-manager-app | grep -E "EPIPE|MaxRetries|bootstrap failed|Redis" || echo "最近2分钟没有 Redis 错误"`
+- `curl -s http://localhost:8084/health`
+- `curl -s http://localhost:8084/config`
+- `docker volume ls --format '{{.Name}}' | grep -E 'subscription[-_]manager[-_]mongodb[-_]data|subscription[-_]manager[-_]redis[-_]data'`
+- `docker run -d --name inspect-old-mongo-underscore -v subscription_manager_mongodb_data:/data/db mongo:7`
+- `docker exec inspect-old-mongo-underscore mongosh --quiet --eval "printjson(db.adminCommand({listDatabases:1}))"`
+- `docker exec inspect-old-mongo-underscore mongosh --quiet --eval "const dbx = db.getSiblingDB('subscription_manager'); printjson(dbx.getCollectionNames())"`
+- `docker run -d --name inspect-old-mongo-hyphen -v subscription-manager_mongodb_data:/data/db mongo:7`
+- `docker exec inspect-old-mongo-hyphen mongosh --quiet --eval "printjson(db.adminCommand({listDatabases:1}))"`
+- `docker exec inspect-old-mongo-hyphen mongosh --quiet --eval "const dbx = db.getSiblingDB('subscription_manager'); printjson(dbx.getCollectionNames())"`
+- `chmod +x scripts/local-mongo-dump-from-legacy-volume.sh scripts/local-mongo-restore-to-shared.sh`
+- `bash -n scripts/local-mongo-dump-from-legacy-volume.sh`
+- `bash -n scripts/local-mongo-restore-to-shared.sh`
+- `printf 'YES\\n' | scripts/local-mongo-dump-from-legacy-volume.sh`
+- `docker run --rm -d --name inspect-users-old -v subscription_manager_mongodb_data:/data/db mongo:7`
+- `docker exec inspect-users-old mongosh --quiet --eval "const dbx = db.getSiblingDB('subscription_manager'); printjson(dbx.users.findOne({}, {_id:0}))"`
+- `docker run --rm -d --name inspect-valid-token -v subscription_manager_mongodb_data:/data/db mongo:7`
+- `docker exec inspect-valid-token mongosh --quiet --eval 'const dbx = db.getSiblingDB("subscription_manager"); printjson(dbx.users.find({status: {$ne: "expired"}, sub_token: {$exists: true, $ne: ""}}, {username:1, sub_token:1, status:1, expire_at:1, disable_after:1}).limit(5).toArray())'`
+- `docker compose stop app`
+- `printf 'YES\\n' | scripts/local-mongo-restore-to-shared.sh backups/subscription_manager_local_20260609_002722.archive.gz`
+- `docker compose up -d app`
+- `curl -i http://localhost:8084/health`
+- `curl -i http://localhost:8084/config`
+- `curl -i "http://localhost:8084/sub/<有效token>?target=clash"`
+- `grep -RIn "node pool is empty\\|test upstreams first\\|upstream pool\\|nodePool\\|pool is empty" backend`
+- `grep -RIn "test.*upstream\\|upstream.*test\\|refresh.*pool\\|seed.*pool\\|node pool" backend/src`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval "printjson(db.system_state.find({}, {_id:0}).toArray())"`
+- `grep -E '^(ADMIN_USERNAME|ADMIN_PASSWORD|SESSION_SECRET|JWT_SECRET)=' .env`
+- `nl -ba backend/src/routes/auth.ts | sed -n '140,230p'`
+- `docker logs --since=2m subscription-manager-app | grep -E "EPIPE|MaxRetries|bootstrap failed|Redis" || echo "最近2分钟没有 Redis 错误"`
+- `docker ps --format 'table {{.Names}}\\t{{.Status}}' | grep -E 'subscription-manager-(app|web|subconverter)|shared-(mongo|redis)|gateway-caddy'`
+
+## Docker/Container Status
+
+- `gateway-caddy`: running
+- `shared-mongo`: running
+- `shared-redis`: running
+- `subscription-manager-web`: running
+- `subscription-manager-subconverter`: running
+- `subscription-manager-app`: running
+
+## API/Interface Status
+
+- `GET http://localhost:8084/health`: 200 OK
+- `GET http://localhost:8084/config`: 200 OK
+- `POST /api/admin/upstreams/test-all`: 200 OK，成功刷新 upstream batch 并写入 node pool
+- `GET http://localhost:8084/sub/<有效token>?target=clash`: 200 OK
+
+## Validation Result
+
+- legacy MongoDB volume identification: pass
+- backup archive creation: pass
+- restore into shared-mongo: pass
+- app restart: pass
+- health/config verification: pass
+- valid subscription token verification: pass
+
+## Notes / Blockers
+
+- 旧数据卷识别结果明确：`subscription_manager_mongodb_data` 才是带有完整 `subscription_manager` 数据库的 volume。
+- `users` 集合实际 token 字段名是 `sub_token`。
+- 订阅验证先返回过一次 `node pool is empty`，随后通过管理员 `test-all` 接口成功刷新 upstream batch，问题已消除。
+- 当前没有阻塞，已经可以进入第 6 步。
+
+## Next Step
+
+- 进入第 6 步：整理本地拆分文档和 Git 提交。
+
+## Date
+
+2026-06-08
+
+## Round Goal
+
+将 `subscription-manager` 改造成独立业务 APP compose：只保留 `web`、`app`、`subconverter`，补齐本地 split 启动脚本、拆分说明文档和环境变量模板，并验证与 `gateway-caddy`、`shared-data` 的连接。
+
+## Project Current Status
+
+- `compose.yaml` 已改为业务 APP 专用编排，只保留 `web`、`app`、`subconverter`。
+- `backend/Dockerfile` 与 `frontend/Dockerfile` 已适配新的 build context。
+- `scripts/local-app-up.sh` / `scripts/local-app-down.sh` 已新增。
+- `docs/SUBSCRIPTION_MANAGER_SPLIT.md` 与 `docs/LOCAL_SPLIT_RUNBOOK.md` 已新增。
+- `docs/DEPLOYMENT.md`、`README.md`、`docker/rebuild-frontend.sh` 已同步本地 split 说明。
+- 通过本地启动脚本可以拉起 `web` 和 `subconverter`，并通过 `gateway-caddy` 正常访问首页。
+- `app` 仍因外部 `shared-data` 的 Redis protected-mode 拒绝容器网络连接而无法完成 bootstrap，导致 `/health` 和 `/config` 目前仍是 502。
+
+## File Changes In This Round
+
+- Updated: [compose.yaml](/vol1/1000/docker/subscription_manager/compose.yaml)
+- Added: [compose.legacy.yaml](/vol1/1000/docker/subscription_manager/compose.legacy.yaml)
+- Updated: [backend/Dockerfile](/vol1/1000/docker/subscription_manager/backend/Dockerfile)
+- Updated: [frontend/Dockerfile](/vol1/1000/docker/subscription_manager/frontend/Dockerfile)
+- Updated: [.env](/vol1/1000/docker/subscription_manager/.env)
+- Added: [.env.split.example](/vol1/1000/docker/subscription_manager/.env.split.example)
+- Added: [scripts/local-app-up.sh](/vol1/1000/docker/subscription_manager/scripts/local-app-up.sh)
+- Added: [scripts/local-app-down.sh](/vol1/1000/docker/subscription_manager/scripts/local-app-down.sh)
+- Updated: [docker/rebuild-frontend.sh](/vol1/1000/docker/subscription_manager/docker/rebuild-frontend.sh)
+- Added: [docs/SUBSCRIPTION_MANAGER_SPLIT.md](/vol1/1000/docker/subscription_manager/docs/SUBSCRIPTION_MANAGER_SPLIT.md)
+- Added: [docs/LOCAL_SPLIT_RUNBOOK.md](/vol1/1000/docker/subscription_manager/docs/LOCAL_SPLIT_RUNBOOK.md)
+- Updated: [README.md](/vol1/1000/docker/subscription_manager/README.md)
+- Updated: [docs/DEPLOYMENT.md](/vol1/1000/docker/subscription_manager/docs/DEPLOYMENT.md)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `cp compose.yaml compose.legacy.yaml`
+- `sed -n '1,260p' compose.yaml`
+- `sed -n '1,220p' frontend/Dockerfile`
+- `sed -n '1,220p' backend/Dockerfile`
+- `sed -n '1,220p' docker/rebuild-backend.sh`
+- `sed -n '1,220p' docker/rebuild-frontend.sh`
+- `sed -n '1,220p' README.md`
+- `sed -n '1,220p' docs/DEPLOYMENT.md`
+- `bash -n scripts/local-app-up.sh`
+- `bash -n scripts/local-app-down.sh`
+- `docker compose -f compose.yaml config`
+- `git status --short`
+- `ls -la /vol1/1000/docker/shared-data`
+- `ls -la /vol1/1000/docker/gateway-caddy`
+- `sed -n '1,220p' /vol1/1000/docker/shared-data/compose.yaml`
+- `sed -n '1,220p' /vol1/1000/docker/gateway-caddy/compose.yaml`
+- `docker compose -f compose.yaml up -d` in `/vol1/1000/docker/shared-data`
+- `docker compose -f compose.yaml up -d` in `/vol1/1000/docker/gateway-caddy`
+- `./scripts/local-app-up.sh`
+- `docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}'`
+- `docker logs --tail=100 subscription-manager-app`
+- `docker logs --tail=100 subscription-manager-web`
+- `docker logs --tail=100 subscription-manager-subconverter`
+- `curl -i -sS http://localhost:8084/health`
+- `curl -i -sS http://localhost:8084/config`
+- `curl -i -sS http://localhost:8084/`
+- `docker exec gateway-caddy sh -lc 'wget -qO- http://app:3000/health || true; echo ---; wget -qO- http://web:80/ || true'`
+- `docker exec subscription-manager-app sh -lc 'wget -qO- http://127.0.0.1:3000/health || true; echo ---; wget -qO- http://127.0.0.1:3000/config || true'`
+- `docker exec subscription-manager-app sh -lc 'getent hosts mongodb; getent hosts redis; getent hosts subconverter; getent hosts app'`
+- `docker inspect subscription-manager-app --format '{{json .Config.Env}}'`
+- `docker exec shared-redis redis-cli CONFIG GET bind protected-mode`
+- `docker run --rm --network data_net redis:7-alpine redis-cli -h redis -p 6379 ping`
+
+## Docker/Container Status
+
+- `subscription-manager-web`: running
+- `subscription-manager-subconverter`: running
+- `subscription-manager-app`: restarting, because Redis bootstrap fails before the HTTP server can bind
+- `gateway-caddy`: running
+- `shared-mongo`: running
+- `shared-redis`: running
+
+## API/Interface Status
+
+- `GET http://localhost:8084/`: 200 OK, web static entry works through `gateway-caddy`
+- `GET http://localhost:8084/health`: 502 Bad Gateway
+- `GET http://localhost:8084/config`: 502 Bad Gateway
+- `app` container itself cannot reach its HTTP listener because bootstrap fails during `redis.ping()`
+- Redis on `shared-data` rejects container-network clients with protected-mode denial
+
+## Validation Result
+
+- `bash -n scripts/local-app-up.sh`: pass
+- `bash -n scripts/local-app-down.sh`: pass
+- `docker compose -f compose.yaml config`: pass
+- frontend build: pass
+- backend build: pass
+- web root via gateway-caddy: pass
+- `/health` and `/config`: fail due external Redis blocker
+
+## Notes / Blockers
+
+- External `shared-data` Redis is running with `protected-mode yes` and no password, which denies container-network access from `subscription-manager`.
+- This cannot be fixed inside the current `subscription-manager` repo without changing the external `shared-data` project or its runtime config.
+- Because of that, the app bootstrap cannot complete and the local split API validation is blocked.
+
+## Next Step
+
+- Confirm how you want to unblock `shared-data` Redis for container clients:
+  - disable protected mode for the shared Redis deployment, or
+  - add a Redis password and update `REDIS_URL`, or
+  - provide an alternate shared-data connection path.
+
+## Date
+
 2026-06-07
 
 ## Round Goal
