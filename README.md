@@ -8,10 +8,9 @@ The local split now uses three projects: `gateway-caddy`, `shared-data`, and `su
 
 - `backend/`: Node.js + TypeScript + Express backend
 - `frontend/`: Vue 3 + Vite + TypeScript frontend scaffold
-- `caddy/`: Caddy reverse proxy config
 - `docker/`: reserved deployment files
 - `compose.yaml`: authoritative local split Compose file for `subscription-manager`
-- `docker-compose.yml`: historical leftover, not used for deployment
+- The old monolithic deployment files and legacy reverse proxy directory have been removed from the main branch
 
 The admin settings page can configure an optional **upstream fetch proxy address** for server-side upstream pulls. The default value is `http://100.69.223.58:17890`. That setting overrides `UPSTREAM_FETCH_PROXY_URL` from the environment; the env var remains a fallback only.
 
@@ -39,8 +38,7 @@ The NAS UI usually auto-loads `compose.yaml`. This file now only defines the bus
 
 It expects `gateway-caddy` and `shared-data` to be running separately.
 
-`docker-compose.yml` is kept only as a historical artifact and should not be used for deployment.
-`compose.legacy.yaml` is also kept only as a historical snapshot of the pre-split stack.
+The old one-piece deployment files and legacy reverse proxy directory have been removed from the main branch. If you need to inspect the old layout, use Git history.
 
 Expected services:
 
@@ -63,7 +61,7 @@ See:
 
 ```bash
 cp .env.example .env
-docker compose -f compose.yaml up -d --build
+docker compose up -d --build
 ```
 
 For the split local workflow, see [`docs/LOCAL_SPLIT_RUNBOOK.md`](docs/LOCAL_SPLIT_RUNBOOK.md).

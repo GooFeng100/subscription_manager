@@ -25,8 +25,8 @@ This document describes the local split state for the `subscription-manager` bus
 ## Authority Files
 
 - `compose.yaml` is the authoritative local split entry for `subscription-manager`
-- `compose.legacy.yaml` is kept only as a historical snapshot
-- `docker-compose.yml` is no longer the source of truth for local split operations
+- The old monolithic compose files and the reverse proxy directory have been removed from the main branch
+- If you need the old layout, inspect Git history instead of current files
 
 ## Why Service Names Stay Stable
 
@@ -93,4 +93,4 @@ For `shared-data`, the service names stay `mongodb` and `redis` while the contai
 - `APP_BASE_URL` must change to the real HTTPS domain
 - `SESSION_COOKIE_SECURE=true` in production
 - Always back up MongoDB before migration
-- Never treat `compose.legacy.yaml` as a deployment target
+- Never treat any removed monolithic compose file as a deployment target

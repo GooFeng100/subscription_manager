@@ -54,5 +54,6 @@ cd /vol1/1000/docker/subscription_manager
 - `shared-data` keeps MongoDB/Redis service names `mongodb`/`redis` on `data_net`.
 - Local Redis uses `protected-mode no` because it is never exposed on the host and only accepts container traffic on `data_net`.
 - Real secrets belong in the runtime `.env`, not in Git.
-- The legacy monolithic compose files are kept only as historical references.
+- The legacy monolithic compose files and the reverse proxy directory have been removed from the main branch.
 - `compose.yaml` is the authoritative local split entry.
+- To inspect the old layout, use Git history.

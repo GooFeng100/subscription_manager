@@ -6,6 +6,77 @@
 
 ## Round Goal
 
+清理 subscription-manager 仓库中已废弃的旧一体化部署文件，保留新的 `compose.yaml` 作为唯一权威入口，并为后续提交/推送做最终验收。
+
+## Project Current Status
+
+- `caddy/`、`docker-compose.yml`、`docker-compose.nas.yml`、`compose.legacy.yaml` 已从主分支移除。
+- `compose.yaml` 仍然是本地拆分后的唯一权威入口。
+- 文档已更新为“旧文件请从 Git 历史查看”的口径。
+- `./scripts/local-split-verify.sh` 在删除前后都通过，`/health` 与 `/config` 仍然正常。
+- 当前未见真实 token、`.env`、`backups/`、`data/`、`*.archive.gz`、`*.log` 被跟踪或 staged。
+
+## File Changes In This Round
+
+- Deleted: [caddy/Caddyfile](/vol1/1000/docker/subscription_manager/caddy/Caddyfile)
+- Deleted: [caddy/Dockerfile](/vol1/1000/docker/subscription_manager/caddy/Dockerfile)
+- Deleted: [compose.legacy.yaml](/vol1/1000/docker/subscription_manager/compose.legacy.yaml)
+- Deleted: [docker-compose.nas.yml](/vol1/1000/docker/subscription_manager/docker-compose.nas.yml)
+- Deleted: [docker-compose.yml](/vol1/1000/docker/subscription_manager/docker-compose.yml)
+- Updated: [README.md](/vol1/1000/docker/subscription_manager/README.md)
+- Updated: [docs/DEPLOYMENT.md](/vol1/1000/docker/subscription_manager/docs/DEPLOYMENT.md)
+- Updated: [docs/LOCAL_SPLIT_RUNBOOK.md](/vol1/1000/docker/subscription_manager/docs/LOCAL_SPLIT_RUNBOOK.md)
+- Updated: [docs/SUBSCRIPTION_MANAGER_SPLIT.md](/vol1/1000/docker/subscription_manager/docs/SUBSCRIPTION_MANAGER_SPLIT.md)
+
+## Commands Executed In This Round
+
+- `git status -sb`
+- `docker compose config --services`
+- `grep -R "caddy/" -n compose.yaml scripts docs README.md docker || true`
+- `grep -R "subscription-manager-caddy|caddy:" -n compose.yaml scripts docs README.md docker || true`
+- `grep -R "docker-compose.prod|docker-compose.nas|docker-compose.yml|compose.legacy" -n scripts docs README.md || true`
+- `git rm -r caddy docker-compose.yml docker-compose.nas.yml compose.legacy.yaml`
+- `rm -f docker-compose.prod.yml`
+- `sed -n '1,120p' README.md`
+- `sed -n '1,140p' docs/DEPLOYMENT.md`
+- `sed -n '1,140p' docs/LOCAL_SPLIT_RUNBOOK.md`
+- `sed -n '1,160p' docs/SUBSCRIPTION_MANAGER_SPLIT.md`
+
+## Docker/Container Status
+
+- `shared-mongo`: running
+- `shared-redis`: running
+- `gateway-caddy`: running
+- `subscription-manager-web`: running
+- `subscription-manager-app`: running
+- `subscription-manager-subconverter`: running
+
+## API/Interface Status
+
+- `GET http://localhost:8084/health`: 200 OK
+- `GET http://localhost:8084/config`: 200 OK
+- `GET http://localhost:8084/sub/<有效token>?target=clash`: previously verified; not retested in this cleanup step
+
+## Validation Result
+
+- legacy deletion staging: pass
+- doc synchronization: pass
+- token/file leak scan: pass
+
+## Notes / Blockers
+
+- No blocker remains for legacy cleanup.
+
+## Next Step
+
+- 继续执行本轮提交并推送到 `origin/master`。
+
+## Date
+
+2026-06-09
+
+## Round Goal
+
 整理本地拆分文档、完成最终验收脚本、做 Git 提交前检查，确保没有真实 token、`.env`、备份 archive 或数据目录被错误纳入 Git。
 
 ## Project Current Status
