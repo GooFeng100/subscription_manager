@@ -20,6 +20,8 @@ const settingsUpdateSchema = z.object({
   upstream_poll_interval_minutes: z.number().int().nonnegative().optional(),
   upstream_fetch_proxy_url: z.string().optional(),
   sub_rate_limit_per_minute: z.number().int().positive().optional(),
+  sub_wait_node_pool_ms: z.number().int().min(0).max(60000).optional(),
+  sub_wait_template_ms: z.number().int().min(0).max(120000).optional(),
   login_fail_limit: z.number().int().positive().optional(),
   login_lock_minutes: z.number().int().positive().optional(),
   register_ip_limit: z.number().int().positive().optional(),

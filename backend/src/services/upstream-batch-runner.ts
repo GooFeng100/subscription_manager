@@ -3,14 +3,33 @@ import { env } from "../config/env.js";
 import { adminsCol, rotationLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { redis } from "../lib/redis.js";
-import { countNodeProtocols, maskUrlForLog, maskToken } from "../lib/subscription-conversion.js";
-import { getUpstreamBatchState, setUpstreamBatchState } from "../lib/upstream-batch-state.js";
-import { setNodePoolText } from "../lib/node-pool.js";
+import { countNodeProtocols, maskUrlForLog } from "../lib/subscription-conversion.js";
+import { getUpstreamBatchState, setCacheStepState, setUpstreamBatchState } from "../lib/upstream-batch-state.js";
+import { clearNodePool, hydrateNodePoolFromMongo, saveNodePoolSnapshot } from "../lib/node-pool.js";
+import {
+  clearSubscriptionTemplateCache,
+  DEFAULT_TEMPLATE_TARGET_COUNT,
+  warmDefaultSubscriptionTemplates
+} from "../lib/subscription-template-cache.js";
 import { testUpstreamSource } from "../lib/upstream-testing.js";
 import { bumpCurrentSubVersion, getCurrentSubVersion } from "./subscription-version.js";
 
 const BATCH_LOCK_KEY = "sm:sub:upstream-batch-lock";
 const BATCH_LOCK_TTL_SECONDS = 60 * 30;
+
+function logBatchEvent(level: "log" | "warn" | "error", message: string, meta: Record<string, unknown> = {}) {
+  const payload = { scope: "upstream-batch", ...meta };
+  const line = `[batch] ${message} ${JSON.stringify(payload)}`;
+  if (level === "warn") {
+    console.warn(line);
+    return;
+  }
+  if (level === "error") {
+    console.error(line);
+    return;
+  }
+  console.log(line);
+}
 
 export type UpstreamBatchTrigger = "manual" | "auto";
 
@@ -83,7 +102,7 @@ type RunOptions = {
 
 async function acquireBatchLock() {
   const token = `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const ok = await (redis as any).set(BATCH_LOCK_KEY, token, "NX", "EX", BATCH_LOCK_TTL_SECONDS);
+  const ok = await redis.call("set", BATCH_LOCK_KEY, token, "NX", "EX", String(BATCH_LOCK_TTL_SECONDS));
   return ok ? token : null;
 }
 
@@ -150,19 +169,52 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
     docsCount = docs.length;
     startedAt = new Date().toISOString();
     const runtimeSettings = await getRuntimeSettings();
+    const fromVersion = await getCurrentSubVersion();
+    logBatchEvent("log", "batch refresh started", { fromVersion: fromVersion.version, total: docsCount, trigger: options.trigger });
     await setUpstreamBatchState({
       running: true,
       ready: false,
+      phase: "refreshing_upstreams",
+      version: fromVersion.version,
       total: docsCount,
       success: 0,
       failed: 0,
       nodeCount: 0,
+      mongoNodePool: {
+        status: "running",
+        ready: false,
+        total: docsCount,
+        success: 0,
+        nodeCount: 0,
+        version: fromVersion.version,
+        updatedAt: new Date().toISOString(),
+        message: "upstream refresh running"
+      },
+      redisNodePool: {
+        status: "idle",
+        ready: false,
+        total: docsCount,
+        success: 0,
+        nodeCount: 0,
+        version: fromVersion.version,
+        updatedAt: new Date().toISOString(),
+        message: "waiting for mongo node pool"
+      },
+      template: {
+        status: "idle",
+        ready: false,
+        total: DEFAULT_TEMPLATE_TARGET_COUNT,
+        success: 0,
+        nodeCount: 0,
+        version: fromVersion.version,
+        updatedAt: new Date().toISOString(),
+        message: "waiting for redis node pool"
+      },
       startedAt,
       finishedAt: null,
       message: "batch test running"
     });
 
-    const fromVersion = await getCurrentSubVersion();
     let nextNodePoolText = "";
 
     for (const doc of docs) {
@@ -239,8 +291,67 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
       });
     }
 
-    await setNodePoolText(nextNodePoolText);
     const toVersion = await bumpCurrentSubVersion(new Date());
+    await setUpstreamBatchState({
+      phase: "writing_mongo",
+      version: toVersion.version,
+      total: docsCount,
+      success: successCount,
+      failed: failedCount,
+      nodeCount,
+      message: "writing node pool to mongo"
+    });
+    const snapshot = await saveNodePoolSnapshot(toVersion.version, nextNodePoolText);
+    await setCacheStepState("mongoNodePool", {
+      status: "ready",
+      ready: true,
+      total: docsCount,
+      success: successCount,
+      nodeCount: snapshot.nodeCount,
+      version: toVersion.version,
+      message: `mongo node pool ready (${successCount}/${docsCount})`
+    });
+
+    await setUpstreamBatchState({
+      phase: "hydrating_redis",
+      ready: false,
+      version: toVersion.version,
+      message: "hydrating redis node pool"
+    });
+    await setCacheStepState("redisNodePool", {
+      status: "running",
+      ready: false,
+      total: docsCount,
+      success: 0,
+      nodeCount: snapshot.nodeCount,
+      version: toVersion.version,
+      message: "redis node pool hydrating"
+    });
+    await clearNodePool();
+    await clearSubscriptionTemplateCache(fromVersion.version);
+    await clearSubscriptionTemplateCache(toVersion.version);
+    const hydrated = await hydrateNodePoolFromMongo(toVersion.version);
+    if (!hydrated) {
+      throw new Error("redis node pool hydration failed");
+    }
+    await setCacheStepState("redisNodePool", {
+      status: "ready",
+      ready: true,
+      total: docsCount,
+      success: successCount,
+      nodeCount: hydrated.nodeCount,
+      version: toVersion.version,
+      message: `redis node pool ready (${successCount}/${docsCount})`
+    });
+
+    await setUpstreamBatchState({
+      phase: "warming_templates",
+      ready: false,
+      version: toVersion.version,
+      message: "warming subscription templates"
+    });
+    await warmDefaultSubscriptionTemplates(toVersion.version, hydrated);
+
     const operator = options.operatorUserId && options.operatorUsername
       ? { operatorUserId: options.operatorUserId, operatorUsername: options.operatorUsername }
       : options.trigger === "auto"
@@ -263,6 +374,8 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
     await setUpstreamBatchState({
       running: false,
       ready: true,
+      phase: "ready",
+      version: toVersion.version,
       total: docsCount,
       success: successCount,
       failed: failedCount,
@@ -272,6 +385,14 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
       message: docsCount
         ? `batch test completed (${successCount}/${docsCount})`
         : "batch test completed (no enabled upstreams)"
+    });
+    logBatchEvent("log", "batch refresh completed", {
+      fromVersion: fromVersion.version,
+      toVersion: toVersion.version,
+      total: docsCount,
+      success: successCount,
+      failed: failedCount,
+      nodeCount
     });
 
     const summary = {
@@ -304,9 +425,25 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "batch test aborted";
+    logBatchEvent("error", "batch refresh failed", {
+      error: message,
+      total: docsCount,
+      success: successCount,
+      failed: failedCount,
+      nodeCount
+    });
+    await setCacheStepState("template", {
+      status: "failed",
+      ready: false,
+      total: DEFAULT_TEMPLATE_TARGET_COUNT,
+      success: 0,
+      nodeCount,
+      message
+    });
     await setUpstreamBatchState({
       running: false,
-      ready: true,
+      ready: false,
+      phase: "failed",
       total: docsCount,
       success: successCount,
       failed: failedCount,

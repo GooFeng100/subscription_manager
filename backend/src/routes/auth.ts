@@ -258,7 +258,6 @@ router.post("/change-password", requireAuth, async (req, res) => {
   const ua = userAgent(req.get("user-agent"));
   const sessionUserId = req.session.userId;
   const sessionUserType = req.session.userType;
-  const sessionUsername = req.session.username || "unknown";
 
   if (sessionUserType === "admin") {
     const admin = await adminsCol().findOne({ _id: new ObjectId(sessionUserId) });

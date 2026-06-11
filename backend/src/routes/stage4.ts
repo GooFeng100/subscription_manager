@@ -16,13 +16,15 @@ import {
 } from "../lib/subscription-display.js";
 import {
   countNodeProtocols,
-  createShortCacheKey,
   maskToken
 } from "../lib/subscription-conversion.js";
-import { getNodePoolText } from "../lib/node-pool.js";
+import { getNodePoolCacheSnapshot, triggerNodePoolCacheRecovery } from "../lib/node-pool.js";
+import { getSubscriptionTemplate, triggerSubscriptionTemplateRecovery } from "../lib/subscription-template-cache.js";
 import { getCurrentSubVersion } from "../services/subscription-version.js";
+import { getUpstreamBatchState, setCacheStepState } from "../lib/upstream-batch-state.js";
 
 const router = Router();
+const CACHE_WAIT_POLL_MS = 250;
 
 const targetSchema = z.string().trim().min(1).max(32).optional();
 
@@ -34,19 +36,12 @@ function isExpired(expireAt: Date | null, now: Date) {
   return Boolean(expireAt && expireAt.getTime() < now.getTime());
 }
 
-function applyEmojiPreservingParams(url: URL) {
-  url.searchParams.set("emoji", "true");
-  url.searchParams.set("add_emoji", "true");
-  url.searchParams.set("remove_emoji", "false");
-  url.searchParams.set("remove_old_emoji", "false");
-}
-
 function normalizeFilenamePart(value: string) {
   return String(value || "")
     .trim()
     .replace(/[\\/:*?"<>|]+/g, "_")
     .replace(/\s+/g, " ")
-    .replace(/\u0000/g, "")
+    .replaceAll(String.fromCharCode(0), "")
     .slice(0, 120);
 }
 
@@ -84,6 +79,15 @@ function buildEmptySubscriptionTitle(status: "expired" | "inactive" | "disabled"
     return "账号已禁用，请联系管理员";
   }
   return "订阅已过期，请联系管理员";
+}
+
+const EXPIRED_SUBSCRIPTION_NOTE = "订阅已过期，请兑换有效期或联系管理员";
+
+function buildEmptySubscriptionSuffix(status: "expired" | "inactive" | "disabled") {
+  if (status === "expired") {
+    return EXPIRED_SUBSCRIPTION_NOTE;
+  }
+  return buildEmptySubscriptionTitle(status);
 }
 
 function buildEmptySubscriptionContent(target: string) {
@@ -139,17 +143,6 @@ function encodeBase64SubscriptionContent(text: string) {
   return normalized ? Buffer.from(normalized, "utf8").toString("base64") : "";
 }
 
-function normalizeConverterTarget(target: string) {
-  switch (target) {
-    case "mihomo":
-      return "clash";
-    case "sing-box":
-      return "singbox";
-    default:
-      return target;
-  }
-}
-
 function formatSubscriptionExpireDate(user: { expire_at: Date | null; disable_after: Date | null }) {
   return formatShanghaiDate(user.expire_at);
 }
@@ -192,6 +185,104 @@ function buildContentDisposition(filename: string, format: SubscriptionResponseF
 
 function headerUtf8(value: string) {
   return Buffer.from(value, "utf8").toString("latin1");
+}
+
+function logSubscriptionWait(level: "log" | "warn" | "error", message: string, meta: Record<string, unknown> = {}) {
+  const payload = { scope: "subscription-wait", ...meta };
+  const line = `[sub-wait] ${message} ${JSON.stringify(payload)}`;
+  if (level === "warn") {
+    console.warn(line);
+    return;
+  }
+  if (level === "error") {
+    console.error(line);
+    return;
+  }
+  console.log(line);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForNodePoolCache(version: string, timeoutMs: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const snapshot = await getNodePoolCacheSnapshot(version);
+    if (snapshot?.text) {
+      return snapshot;
+    }
+    await sleep(CACHE_WAIT_POLL_MS);
+  }
+  logSubscriptionWait("warn", "node pool wait timed out", { version, timeoutMs });
+  return null;
+}
+
+async function waitForSubscriptionTemplate(version: string, target: string, timeoutMs: number) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= timeoutMs) {
+    const template = await getSubscriptionTemplate(version, target);
+    if (template) {
+      return template;
+    }
+    await sleep(CACHE_WAIT_POLL_MS);
+  }
+  logSubscriptionWait("warn", "template wait timed out", { version, target, timeoutMs });
+  return null;
+}
+
+async function healNodePoolStateIfCached(version: string, snapshot: { nodeCount: number } | null) {
+  if (!snapshot) return;
+  const batchState = await getUpstreamBatchState();
+  if (batchState.redisNodePool.status !== "failed" && batchState.mongoNodePool.status !== "failed") {
+    return;
+  }
+  logSubscriptionWait("log", "node pool self-check restored from cache", {
+    version,
+    nodeCount: snapshot.nodeCount
+  });
+  await setCacheStepState("mongoNodePool", {
+    status: "ready",
+    ready: true,
+    total: 0,
+    success: 0,
+    nodeCount: snapshot.nodeCount,
+    version,
+    message: "mongo node pool ready"
+  });
+  await setCacheStepState("redisNodePool", {
+    status: "ready",
+    ready: true,
+    total: 0,
+    success: 0,
+    nodeCount: snapshot.nodeCount,
+    version,
+    message: "redis node pool ready"
+  });
+}
+
+async function healTemplateStateIfCached(version: string, target: string, template: string | null) {
+  if (!template) return;
+  const batchState = await getUpstreamBatchState();
+  if (batchState.template.status !== "failed" && batchState.phase !== "failed") {
+    return;
+  }
+  logSubscriptionWait("log", "template self-check restored from cache", {
+    version,
+    target,
+    bytes: template.length
+  });
+  await setCacheStepState("template", {
+    status: "ready",
+    ready: true,
+    total: 1,
+    success: 1,
+    nodeCount: batchState.template.nodeCount,
+    version,
+    message: "template cache ready"
+  });
 }
 
 async function writeAccessLog(params: {
@@ -240,9 +331,9 @@ router.get("/sub/:token", async (req, res) => {
   const ip = clientIp(req.ip);
   const settings = await getRuntimeSettings();
   const target = targetParsed.success ? targetParsed.data || settings.converter_default_target || "clash" : settings.converter_default_target || "clash";
-  const converterTarget = normalizeConverterTarget(target);
   const subVersion = await getCurrentSubVersion();
-  const nodePoolText = await getNodePoolText();
+  const nodePoolWaitMs = Math.max(0, Number(settings.sub_wait_node_pool_ms) || 0);
+  const templateWaitMs = Math.max(nodePoolWaitMs, Number(settings.sub_wait_template_ms) || 0);
 
   const now = new Date();
   const user = await usersCol().findOne({ sub_token: token });
@@ -296,6 +387,20 @@ router.get("/sub/:token", async (req, res) => {
     }
     return buildEmptySubscriptionContent(target) || `# ${buildEmptySubscriptionTitle(status)}`;
   };
+  const emptyClashSubscriptionBody = (status: "expired" | "inactive" | "disabled") => {
+    const body = emptySubscriptionBody(status);
+    if (target !== "clash" && target !== "mihomo") {
+      return body;
+    }
+    return insertClashSubscriptionInfoGroup(
+      body,
+      buildSubscriptionInfoName({
+        version: String(subVersion.version),
+        expireDate: formatSubscriptionExpireDate(syncedUser),
+        suffix: buildEmptySubscriptionSuffix(status)
+      })
+    );
+  };
 
   if (syncedUser.status === "disabled") {
     await writeAccessLog({
@@ -314,7 +419,7 @@ router.get("/sub/:token", async (req, res) => {
       responseFilename(),
       userInfoHeader
     );
-    return response.send(emptySubscriptionBody("disabled"));
+    return response.send(emptyClashSubscriptionBody("disabled"));
   }
 
   if (syncedUser.status === "inactive") {
@@ -334,7 +439,7 @@ router.get("/sub/:token", async (req, res) => {
       responseFilename(),
       userInfoHeader
     );
-    return response.send(emptySubscriptionBody("inactive"));
+    return response.send(emptyClashSubscriptionBody("inactive"));
   }
 
   if (isExpired(syncedUser.expire_at, now) && syncedUser.status === "expired") {
@@ -354,7 +459,7 @@ router.get("/sub/:token", async (req, res) => {
       responseFilename(),
       userInfoHeader
     );
-    return response.send(emptySubscriptionBody("expired"));
+    return response.send(emptyClashSubscriptionBody("expired"));
   }
 
   const rlKey = `sm:sub:rl:${token}:${ip}`;
@@ -376,6 +481,20 @@ router.get("/sub/:token", async (req, res) => {
     return res.status(429).type("text/plain; charset=utf-8").send("too many subscription requests");
   }
 
+  const isTemplateTarget = target === "clash" || target === "mihomo";
+  let nodePoolSnapshot = await getNodePoolCacheSnapshot(subVersion.version);
+  await healNodePoolStateIfCached(subVersion.version, nodePoolSnapshot);
+  if (!nodePoolSnapshot?.text) {
+    if (isTemplateTarget) {
+      void triggerSubscriptionTemplateRecovery(subVersion.version, target);
+      nodePoolSnapshot = await waitForNodePoolCache(subVersion.version, templateWaitMs);
+    } else {
+      void triggerNodePoolCacheRecovery(subVersion.version);
+      nodePoolSnapshot = await waitForNodePoolCache(subVersion.version, nodePoolWaitMs);
+    }
+  }
+
+  const nodePoolText = nodePoolSnapshot?.text || "";
   if (!nodePoolText) {
     await writeAccessLog({
       userId: String(syncedUser._id),
@@ -385,9 +504,13 @@ router.get("/sub/:token", async (req, res) => {
       ip,
       statusCode: 503,
       success: false,
-      message: "node pool empty"
+      message: isTemplateTarget ? "subscription template recovery timed out" : "node pool cache recovery timed out"
     });
-    return res.status(503).type("text/plain; charset=utf-8").send("node pool is empty, please test upstreams first");
+    return res
+      .status(503)
+      .setHeader("Retry-After", "3")
+      .type("text/plain; charset=utf-8")
+      .send(isTemplateTarget ? "subscription template is recovering, please retry later" : "node pool cache is recovering, please retry later");
   }
 
   if (target === "shadowrocket") {
@@ -475,20 +598,6 @@ router.get("/sub/:token", async (req, res) => {
     ).send(payload);
   }
 
-  const sourceCacheKey = createShortCacheKey();
-  const sourceCacheTtl = 300;
-  await redis.set(`sm:sub:source:${sourceCacheKey}`, nodePoolText, "EX", sourceCacheTtl);
-
-  const internalSourceUrl = new URL(`http://app:${env.PORT}/api/internal/converter-source/${sourceCacheKey}`);
-  internalSourceUrl.searchParams.set("secret", env.CONVERTER_SOURCE_SECRET || "");
-  internalSourceUrl.searchParams.set("format", "base64");
-
-  const converterUrl = new URL(settings.converter_backend_url || "http://subconverter:25500/sub");
-  converterUrl.searchParams.set("target", converterTarget);
-  converterUrl.searchParams.set("url", internalSourceUrl.toString());
-  if (settings.converter_default_config_url) {
-    converterUrl.searchParams.set("config", settings.converter_default_config_url);
-  }
   const subscriptionFilename = buildSubscriptionFilename(
     settings.subscription_filename_template || "{{username}}_云域数字",
     {
@@ -498,91 +607,62 @@ router.get("/sub/:token", async (req, res) => {
       version: String(subVersion.version)
     }
   );
-  converterUrl.searchParams.set("filename", subscriptionFilename);
-  applyEmojiPreservingParams(converterUrl);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), env.SUB_CONVERTER_TIMEOUT_MS);
-  try {
-    const resp = await fetch(converterUrl.toString(), {
-      method: "GET",
-      signal: controller.signal,
-      headers: { "User-Agent": "subscription-manager/1.0" }
-    });
-    const text = await resp.text();
-    if (!resp.ok) {
-      await writeAccessLog({
-        userId: String(syncedUser._id),
-        username: syncedUser.username,
-        token,
-        target,
-        ip,
-        statusCode: 502,
-        success: false,
-        message: `converter failed HTTP ${resp.status}`
-      });
-      return res.status(502).type("text/plain; charset=utf-8").send("converter request failed");
-    }
-    if (!text.trim()) {
-      await writeAccessLog({
-        userId: String(syncedUser._id),
-        username: syncedUser.username,
-        token,
-        target,
-        ip,
-        statusCode: 502,
-        success: false,
-        message: "converter returned empty payload"
-      });
-      return res.status(502).type("text/plain; charset=utf-8").send("converter returned empty payload");
-    }
-    const expireDate = formatSubscriptionExpireDate(syncedUser);
-    const responseText = (target === "clash" || target === "mihomo")
-      ? insertClashSubscriptionInfoGroup(
-        text,
-        buildSubscriptionInfoName({ version: String(subVersion.version), expireDate })
-      )
-      : text;
-    await writeAccessLog({
-      userId: String(syncedUser._id),
-      username: syncedUser.username,
-      token,
-      target,
-      ip,
-      statusCode: 200,
-      success: true,
-      message: `ok nodes=${countNodeProtocols(nodePoolText)}`
-    });
-    const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
-    const response = res
-      .status(200)
-      .setHeader("X-Subscription-Version", String(subVersion.version))
-      .setHeader("Content-Disposition", buildContentDisposition(subscriptionFilename, responseFormatForTarget(target)))
-      .setHeader("profile-title", headerUtf8(subscriptionFilename))
-      .setHeader("profile-update-interval", "24")
-      .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
-      .setHeader("Pragma", "no-cache")
-      .setHeader("Content-Type", responseFormatForTarget(target).contentType);
-    if (userInfoHeader) {
-      response.setHeader("Subscription-Userinfo", userInfoHeader);
-    }
-    return response.send(responseText);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "converter request error";
-    await writeAccessLog({
-      userId: String(syncedUser._id),
-      username: syncedUser.username,
-      token,
-      target,
-      ip,
-      statusCode: 502,
-      success: false,
-      message
-    });
-    return res.status(502).type("text/plain; charset=utf-8").send("converter request failed");
-  } finally {
-    clearTimeout(timeout);
+  let template = await getSubscriptionTemplate(subVersion.version, target);
+  await healTemplateStateIfCached(subVersion.version, target, template);
+  if (!template) {
+    void triggerSubscriptionTemplateRecovery(subVersion.version, target);
+    template = await waitForSubscriptionTemplate(subVersion.version, target, templateWaitMs);
   }
+  if (!template) {
+    await writeAccessLog({
+      userId: String(syncedUser._id),
+      username: syncedUser.username,
+      token,
+      target,
+      ip,
+      statusCode: 503,
+      success: false,
+      message: "subscription template recovery timed out"
+    });
+    return res
+      .status(503)
+      .setHeader("Retry-After", "3")
+      .type("text/plain; charset=utf-8")
+      .send("subscription template is recovering, please retry later");
+  }
+
+  const expireDate = formatSubscriptionExpireDate(syncedUser);
+  const responseText = (target === "clash" || target === "mihomo")
+    ? insertClashSubscriptionInfoGroup(
+      template,
+      buildSubscriptionInfoName({ version: String(subVersion.version), expireDate })
+    )
+    : template;
+  await writeAccessLog({
+    userId: String(syncedUser._id),
+    username: syncedUser.username,
+    token,
+    target,
+    ip,
+    statusCode: 200,
+    success: true,
+    message: `ok nodes=${countNodeProtocols(nodePoolText)} template=redis`
+  });
+  const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
+  const response = res
+    .status(200)
+    .setHeader("X-Subscription-Version", String(subVersion.version))
+    .setHeader("Content-Disposition", buildContentDisposition(subscriptionFilename, responseFormatForTarget(target)))
+    .setHeader("profile-title", headerUtf8(subscriptionFilename))
+    .setHeader("profile-update-interval", "24")
+    .setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
+    .setHeader("Pragma", "no-cache")
+    .setHeader("Content-Type", responseFormatForTarget(target).contentType);
+  if (userInfoHeader) {
+    response.setHeader("Subscription-Userinfo", userInfoHeader);
+  }
+  return response.send(responseText);
 });
 
 export default router;

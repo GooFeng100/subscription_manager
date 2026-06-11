@@ -90,7 +90,14 @@ router.get("/admin/upstreams", requireAdmin, async (_req, res) => {
     batch_test_failed: batchState.failed,
     batch_test_node_count: batchState.nodeCount,
     batch_test_updated_at: batchState.updatedAt,
-    batch_test_message: batchState.message
+    batch_test_message: batchState.message,
+    cache_state: {
+      phase: batchState.phase,
+      version: batchState.version,
+      mongo_node_pool: batchState.mongoNodePool,
+      redis_node_pool: batchState.redisNodePool,
+      template: batchState.template
+    }
   });
 });
 

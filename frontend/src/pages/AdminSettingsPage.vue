@@ -10,6 +10,22 @@
     <p v-if="error" class="error">{{ error }}</p>
 
     <section class="panel">
+      <div class="panel-head"><h2>订阅等待策略</h2></div>
+      <div class="panel-body form-grid">
+        <label><span class="label-title">节点池等待时长（毫秒） <em class="req">*</em></span>
+          <input id="settings-sub-wait-node-pool-ms" name="settingsSubWaitNodePoolMs" v-model.number="form.sub_wait_node_pool_ms" type="number" min="0" step="250" :class="{ 'is-error': !!fieldError.sub_wait_node_pool_ms }" @focus="clearFieldError('sub_wait_node_pool_ms')" />
+          <small v-if="fieldError.sub_wait_node_pool_ms" class="error-text">{{ fieldError.sub_wait_node_pool_ms }}</small>
+          <small>`ss/shadowrocket` 订阅在 Redis 节点池缺失时，当前请求最多等待多久再决定是否返回。</small>
+        </label>
+        <label><span class="label-title">模板等待时长（毫秒） <em class="req">*</em></span>
+          <input id="settings-sub-wait-template-ms" name="settingsSubWaitTemplateMs" v-model.number="form.sub_wait_template_ms" type="number" min="0" step="250" :class="{ 'is-error': !!fieldError.sub_wait_template_ms }" @focus="clearFieldError('sub_wait_template_ms')" />
+          <small v-if="fieldError.sub_wait_template_ms" class="error-text">{{ fieldError.sub_wait_template_ms }}</small>
+          <small>`clash` 订阅在模板或节点池缺失时，当前请求最多等待多久；建议不小于节点池等待时长。</small>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="panel-head"><h2>基础设置</h2></div>
       <div class="panel-body form-grid">
         <label>
@@ -169,6 +185,8 @@ type Settings = {
   upstream_poll_interval_minutes: number;
   upstream_fetch_proxy_url: string;
   sub_rate_limit_per_minute: number;
+  sub_wait_node_pool_ms: number;
+  sub_wait_template_ms: number;
   login_fail_limit: number;
   login_lock_minutes: number;
   register_ip_limit: number;
@@ -190,6 +208,8 @@ const form = reactive<Settings & {
   upstream_poll_interval_minutes: 60,
   upstream_fetch_proxy_url: defaultUpstreamFetchProxyUrl,
   sub_rate_limit_per_minute: 60,
+  sub_wait_node_pool_ms: 1500,
+  sub_wait_template_ms: 3000,
   login_fail_limit: 5,
   login_lock_minutes: 15,
   register_ip_limit: 10,
@@ -200,7 +220,6 @@ const form = reactive<Settings & {
 
 const targetOptions = [
   { value: 'clash', label: 'Clash' },
-  { value: 'mihomo', label: 'Mihomo' },
   { value: 'sing-box', label: 'sing-box' },
   { value: 'v2ray', label: 'V2Ray' },
   { value: 'shadowrocket', label: 'Shadowrocket' }
@@ -256,6 +275,8 @@ async function save() {
       upstream_poll_interval_minutes: Math.max(0, Number(form.upstream_poll_interval_minutes) || 0),
       upstream_fetch_proxy_url: String(form.upstream_fetch_proxy_url || defaultUpstreamFetchProxyUrl).trim(),
       sub_rate_limit_per_minute: Math.max(1, Number(form.sub_rate_limit_per_minute) || 1),
+      sub_wait_node_pool_ms: Math.max(0, Number(form.sub_wait_node_pool_ms) || 0),
+      sub_wait_template_ms: Math.max(0, Number(form.sub_wait_template_ms) || 0),
       login_fail_limit: Math.max(1, Number(form.login_fail_limit) || 1),
       login_lock_minutes: Math.max(1, Number(form.login_lock_minutes) || 1),
       register_ip_limit: Math.max(1, Number(form.register_ip_limit) || 1),
@@ -362,6 +383,11 @@ function validateForm() {
   if (testUrl && !/^https?:\/\/.+/i.test(testUrl)) fieldError.proxy_test_url = '请输入有效的 http/https 地址';
   if (!validatePositiveInt(Number(form.upstream_poll_interval_minutes), 0, 10080)) fieldError.upstream_poll_interval_minutes = '范围 0~10080 分钟';
   if (!validatePositiveInt(Number(form.sub_rate_limit_per_minute), 1, 10000)) fieldError.sub_rate_limit_per_minute = '范围 1~10000 次/分钟';
+  if (!validatePositiveInt(Number(form.sub_wait_node_pool_ms), 0, 60000)) fieldError.sub_wait_node_pool_ms = '范围 0~60000 毫秒';
+  if (!validatePositiveInt(Number(form.sub_wait_template_ms), 0, 120000)) fieldError.sub_wait_template_ms = '范围 0~120000 毫秒';
+  if (!fieldError.sub_wait_node_pool_ms && !fieldError.sub_wait_template_ms && Number(form.sub_wait_template_ms) < Number(form.sub_wait_node_pool_ms)) {
+    fieldError.sub_wait_template_ms = '模板等待时长不能小于节点池等待时长';
+  }
   if (!validatePositiveInt(Number(form.login_fail_limit), 1, 1000)) fieldError.login_fail_limit = '范围 1~1000';
   if (!validatePositiveInt(Number(form.login_lock_minutes), 1, 10080)) fieldError.login_lock_minutes = '范围 1~10080 分钟';
   if (!validatePositiveInt(Number(form.register_ip_limit), 1, 1000)) fieldError.register_ip_limit = '范围 1~1000';

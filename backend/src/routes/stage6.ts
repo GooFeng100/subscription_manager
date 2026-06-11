@@ -74,8 +74,19 @@ async function getNormalizedRotationSchedules(now = new Date()) {
   if (changed) {
     const updatedAt = now.toISOString();
     await saveRotationSchedules(
-      normalized.map(({ locked, status, ...item }) => ({
-        ...item,
+      normalized.map((item) => ({
+        id: item.id,
+        name: item.name,
+        mode: item.mode,
+        once_date: item.once_date,
+        day_of_month: item.day_of_month,
+        hour: item.hour,
+        minute: item.minute,
+        cron_desc: item.cron_desc,
+        next_run_at: item.next_run_at,
+        enabled: item.enabled,
+        note: item.note,
+        created_at: item.created_at,
         updated_at: updatedAt
       }))
     );

@@ -2,6 +2,1172 @@
 
 ## Date
 
+2026-06-12
+
+## Round Goal
+
+再次把整条订阅链路按不同场景跑一遍，验证正常返回、模板缺失、节点池缺失、失败态自愈这些路径是否都能按预期工作。
+
+## Project Current Status
+
+- 已完成多场景订阅链路测试：
+  - 正常场景：`clash` / `ss` 都能返回 `200`
+  - 模板缺失场景：删除 `sm:sub:template:26.6.109:clash` 后，`clash` 请求仍可返回 `200` 并恢复模板缓存
+  - 节点池缺失场景：删除 `sm:sub:node-pool` 和 `sm:sub:node-pool:meta` 后，`ss` 请求仍可返回 `200` 并恢复节点池缓存
+  - 失败态自愈场景：把模板状态人工改成 `failed` 但保留缓存后，请求会自动恢复为 `ready`
+- 本轮测试还暴露并修复了一个状态问题：
+  - 节点池恢复完成后，batch 总状态曾短暂停在 `hydrating_redis`
+  - 已修复为恢复完成后同步写回 `ready`
+- 自愈日志仍然可见：
+  - `template self-check restored from cache`
+  - `node pool self-check restored from cache`
+- `subscription-manager-app` 已重新构建并重启，`GET /health` 维持 `200`
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/node-pool.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/node-pool.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.109:clash`
+- `curl -s -D /tmp/baseline_clash_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/baseline_clash_body.txt`
+- `curl -s -D /tmp/baseline_ss_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=ss' -o /tmp/baseline_ss_body.txt`
+- `docker exec shared-redis redis-cli DEL sm:sub:template:26.6.109:clash`
+- `curl -s -D /tmp/miss_template_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/miss_template_body.txt`
+- `docker logs --since 3m subscription-manager-app 2>&1 | grep -E '\\[sub-wait\\]|\\[template\\]' | tail -n 60`
+- `docker exec shared-redis redis-cli DEL sm:sub:node-pool sm:sub:node-pool:meta`
+- `curl -s -D /tmp/miss_nodepool_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=ss' -o /tmp/miss_nodepool_body.txt`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); db.system_state.updateOne({key:\"runtime_settings\"}, {$set:{\"payload.sub_wait_template_ms\":0,updated_at:new Date()}}, {upsert:true}); ...'`
+- `docker exec shared-redis redis-cli DEL sm:sub:template:26.6.109:clash`
+- `curl -s -D /tmp/template_timeout_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/template_timeout_body.txt`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); db.system_state.updateOne({key:\"runtime_settings\"}, {$set:{\"payload.sub_wait_template_ms\":3000,updated_at:new Date()}}, {upsert:true}); ...'`
+- `curl -s -D /tmp/failed_round_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/failed_round_body.txt`
+- `docker logs --since 2m subscription-manager-app 2>&1 | grep -E '\\[sub-wait\\]|\\[template\\]|\\[node-pool\\]' | tail -n 80`
+- `npm run typecheck` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d --build app`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/<有效token>?target=clash`: 200 OK
+- `GET /sub/<有效token>?target=ss`: 200 OK
+- 模板缺失时，请求会恢复模板并返回 200
+- 节点池缺失时，请求会恢复节点池并返回 200
+- 模板状态被人工打成 `failed` 但缓存仍在时，请求会自愈回 `ready`
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend build: pass
+- App rebuild: pass
+- 正常场景请求: pass
+- 模板缺失恢复: pass
+- 节点池缺失恢复: pass
+- 失败态自愈: pass
+- 节点池恢复后总状态回写 `ready`: pass
+
+## Notes / Blockers
+
+- 这轮没有稳定复现 `503` 超时，因为当前恢复速度太快，`0ms` 等待窗口下也常常直接在请求返回前完成恢复。
+- 之前那个“节点池恢复完总状态还停在 `hydrating_redis`”的问题已经修掉了。
+
+## Next Step
+
+- 如果你还要继续压测，我建议下一步专门做“超时边界值”的参数扫描，找到在当前机器上最小但稳定的等待阈值。
+
+## Round Goal
+
+优化失败后的自检恢复：当模板或节点池缓存实际上已经存在，但状态还停留在 `failed` 时，请求侧要能把状态自动拉回 `ready`，避免 UI 和日志一直卡在失败态。
+
+## Project Current Status
+
+- 已在订阅请求链路加入失败态自愈：
+  - 模板缓存存在但模板状态为 `failed` 时，请求会把模板状态拉回 `ready`
+  - Redis 节点池缓存存在但节点池状态为 `failed` 时，请求会把节点池状态拉回 `ready`
+- 自愈日志已经补充：
+  - `template self-check restored from cache`
+  - `node pool self-check restored from cache`
+- 这次优化验证结果：
+  - 手动把模板状态改成 `failed`，但保留模板缓存
+  - 下一次订阅请求返回 `200`
+  - 随后状态被自动恢复为 `ready`
+- `subscription-manager-app` 已重新构建并重启，`GET /health` 维持 `200`
+
+## File Changes In This Round
+
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d --build app`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state | node -e '...'`
+- `curl -s -D /tmp/self_heal_headers2.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/self_heal_body2.txt`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state`
+- `docker logs --since 2m subscription-manager-app 2>&1 | grep -E '\\[sub-wait\\]|\\[template\\]' | tail -n 80`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/<有效token>?target=clash`: 200 OK
+- 当模板状态被人工打成 `failed`，但缓存仍存在时，请求会自动恢复状态并返回 200
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend build: pass
+- App rebuild: pass
+- 模板失败态自愈测试: pass
+- 请求返回: 200 OK
+- 状态恢复: `failed -> ready` pass
+
+## Notes / Blockers
+
+- 这次优化只处理“状态卡在 `failed`，但缓存实际可用”的场景，不会把真正缺缓存的故障掩盖掉。
+- 如果后续你想把节点池也做成同样的失败态自愈，我可以再把这条路径统一抽成公共 helper。
+
+## Next Step
+
+- 如果你认可这版行为，我建议下一步继续看模板/节点池状态面板是否还需要加一个“最近一次恢复来源”的提示，方便肉眼判断是自愈还是新建缓存。
+
+## Round Goal
+
+补强订阅缓存恢复日志，把模板失败/等待超时/节点池缺失这几类原因拆开，方便下次你手动点测试时直接从日志定位 fail 的具体阶段。
+
+## Project Current Status
+
+- 已在模板恢复链路增加结构化日志：
+  - `cache recovery started`
+  - `cache recovery warming templates`
+  - `converter request started`
+  - `template cached`
+  - `template recovery completed`
+  - `template recovery failed`
+- 已在 Redis 节点池恢复链路增加结构化日志：
+  - `redis node pool recovery started`
+  - `redis node pool recovery completed`
+  - `redis node pool recovery failed`
+- 已在订阅请求等待链路增加结构化日志：
+  - `node pool wait timed out`
+  - `template wait timed out`
+- 日志内容仅包含版本、目标、阶段、节点数、状态码、错误摘要等，不包含上游完整 URL 或密钥。
+- 本轮测试里，模板恢复确实出现过一次请求等待超时，之后后台仍完成了模板缓存回填，说明：
+  - 失败日志与最终恢复是两件事
+  - 以后手动点测试时可以区分“真正失败”和“等待超时但稍后恢复成功”
+- 后端已重新构建并重启 `subscription-manager-app`，`GET /health` 仍为 200。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/node-pool.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/node-pool.ts)
+- Updated: [backend/src/lib/subscription-template-cache.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-template-cache.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [backend/src/services/upstream-batch-runner.ts](/vol1/1000/docker/subscription_manager/backend/src/services/upstream-batch-runner.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `grep -RIn --exclude-dir=node_modules --exclude-dir=.git -E 'console\\.|logger|log\\(' backend/src`
+- `sed -n '1,260p' backend/src/lib/subscription-template-cache.ts`
+- `sed -n '1,340p' backend/src/lib/node-pool.ts`
+- `sed -n '1,260p' backend/src/services/upstream-batch-runner.ts`
+- `sed -n '1,120p' backend/src/routes/stage4.ts`
+- `sed -n '390,580p' backend/src/routes/stage4.ts`
+- `npm run typecheck` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d --build app`
+- `docker logs --since 30m subscription-manager-app 2>&1 | grep -i -E 'template|warm|fail|error|timeout|node pool|recover'`
+- `docker logs --since 15m subscription-manager-app 2>&1 | grep -E '\\[template\\]|\\[node-pool\\]|\\[batch\\]'`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.109:clash`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson(db.system_state.findOne({key:\"subscription_version\"}))'`
+- `docker exec shared-redis redis-cli DEL sm:sub:template:26.6.109:clash`
+- `curl -s -D /tmp/log_test_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/log_test_body.txt`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.109:clash`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/<有效token>?target=clash`: 503 在等待窗口不足时会返回，并且现在会在日志里明确标出 `template wait timed out`
+- 模板后续仍会继续回填成功，后台最终能回到 `ready`
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend build: pass
+- App rebuild: pass
+- 模板恢复日志补强: pass
+- 节点池恢复日志补强: pass
+- 请求等待超时日志补强: pass
+
+## Notes / Blockers
+
+- 本轮测试里 `clash` 的等待窗口再次触发了超时，所以你如果手动点测试时看到 fail，不一定表示模板真的坏了，可能只是这次等待窗口不够长。
+- 现在日志已经能区分“恢复链路失败”与“请求等待超时”。
+
+## Next Step
+
+- 如需继续，我建议下一步把等待超时的日志里再补一个 `elapsedMs`，这样可以直接看见这次到底等了多久。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+把订阅等待参数做成显眼的系统设置项，并基于真实恢复速度再定一次更稳的默认值，避免第一次请求因为等待窗口太紧而偶发超时。
+
+## Project Current Status
+
+- 已把等待参数单独拆成顶部的“订阅等待策略”区块，系统设置页现在能直接看到：
+  - `节点池等待时长（毫秒）`
+  - `模板等待时长（毫秒）`
+- 已将默认值从 `5000/10000` 收敛并定版为 `1500/3000`，同时同步到：
+  - 后端运行时设置默认值
+  - 前端设置页初始值
+  - 当前 Mongo `runtime_settings` 文档
+- 已验证当前运行时设置实际生效：
+  - `sub_wait_node_pool_ms = 1500`
+  - `sub_wait_template_ms = 3000`
+- 参数对照测试结果：
+  - `1000/2000` 可用，但 `clash` 首次请求已经接近 1 秒窗口，余量偏紧
+  - `1500/3000` 更稳，且首次请求仍能在很短时间内直接返回 `200`
+- `1500/3000` 下的实测结果：
+  - 仅删 `clash` 模板：首次请求 `200`，约 `291ms`
+  - 同时删 `node-pool` + `template`：首次请求 `200`，约 `289ms`
+  - 仅删 `ss` 节点池：首次请求 `200`，约 `265ms`
+- `app` 与 `web` 已完成重建，`GET /health` 为 `200 OK`。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/runtime-settings.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/runtime-settings.ts)
+- Updated: [frontend/src/pages/AdminSettingsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminSettingsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); db.system_state.updateOne({key:\"runtime_settings\"}, {$set:{\"payload.sub_wait_node_pool_ms\":1000,\"payload.sub_wait_template_ms\":2000,updated_at:new Date()}}, {upsert:true}); printjson(db.system_state.findOne({key:\"runtime_settings\"},{payload:1}))'`
+- `npm run typecheck` in `backend`
+- `npm run build` in `backend`
+- `npm run build` in `frontend`
+- `docker compose up -d --build app web`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); db.system_state.updateOne({key:\"runtime_settings\"}, {$set:{\"payload.sub_wait_node_pool_ms\":1500,\"payload.sub_wait_template_ms\":3000,updated_at:new Date()}}, {upsert:true}); printjson({nodePool:db.system_state.findOne({key:\"runtime_settings\"},{payload:1}).payload.sub_wait_node_pool_ms, template:db.system_state.findOne({key:\"runtime_settings\"},{payload:1}).payload.sub_wait_template_ms})'`
+- `docker exec shared-redis redis-cli DEL sm:sub:template:26.6.107:clash`
+- `curl -s -D /tmp/test_1500_t1_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/test_1500_t1_body.txt`
+- `docker exec shared-redis redis-cli DEL sm:sub:node-pool sm:sub:node-pool:meta sm:sub:template:26.6.107:clash`
+- `curl -s -D /tmp/test_1500_t2_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/test_1500_t2_body.txt`
+- `docker exec shared-redis redis-cli DEL sm:sub:node-pool sm:sub:node-pool:meta`
+- `curl -s -D /tmp/test_1500_t3_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=ss' -o /tmp/test_1500_t3_body.txt`
+- `curl -s http://127.0.0.1:8084/health`
+- `rm -f frontend/tsconfig.tsbuildinfo`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up，已在本轮重建
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/<有效token>?target=clash`: 200 OK
+- `GET /sub/<有效token>?target=ss`: 200 OK
+- 系统设置页顶部已新增“订阅等待策略”区块，能直接看到等待值
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend build: pass
+- Frontend build: pass
+- App/Web rebuild: pass
+- `1500/3000` 参数下首个请求仍能等待 ready 并返回 `200`: pass
+- `1000/2000` 可用但余量偏紧: pass
+
+## Notes / Blockers
+
+- 由于当前恢复链路很快，这轮没有触发超时分支；不过 `503 + Retry-After` 逻辑仍保留，作为最后兜底。
+- 设置页这次是通过单独区块来提升可见性，不再和基础设置挤在一起。
+
+## Next Step
+
+- 如需继续，我建议下一步就按 `1500/3000` 这组参数先观察真实用户侧体验，再决定是否还要细调。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+继续优化订阅等待策略，把节点池等待时长与模板等待时长从代码常量提升为运行时配置，并接入系统设置页，后续可直接在 UI 中调整，不再需要改代码。
+
+## Project Current Status
+
+- 已在运行时设置模型中新增两个配置项：
+  - `sub_wait_node_pool_ms`：Redis 节点池等待时长，默认 `5000`
+  - `sub_wait_template_ms`：模板等待时长，默认 `10000`
+- 已在 [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts) 改为动态读取上述配置，不再写死 `5s / 10s`。
+- 已在 [frontend/src/pages/AdminSettingsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminSettingsPage.vue) 增加两个可编辑输入框，并加入范围校验：
+  - 节点池等待时长：`0~60000 ms`
+  - 模板等待时长：`0~120000 ms`
+  - 额外限制：模板等待时长不能小于节点池等待时长
+- 已在 [backend/src/routes/stage7.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage7.ts) 放开这两个设置项的读写。
+- 向后兼容验证：
+  - 当前 Mongo `runtime_settings` 文档中还没有这两个新字段
+  - 系统仍可正常启动、返回订阅，并自动使用默认值 `5000 / 10000`
+  - 说明旧数据无需迁移即可兼容运行
+- 本轮运行验证：
+  - `GET /health`: 200
+  - `GET /sub/<有效token>?target=clash`: 200
+  - `app/web` 已完成重建
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/runtime-settings.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/runtime-settings.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [backend/src/routes/stage7.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage7.ts)
+- Updated: [frontend/src/pages/AdminSettingsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminSettingsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/lib/runtime-settings.ts`
+- `sed -n '1,220p' backend/src/routes/stage7.ts`
+- `sed -n '1,260p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '220,420p' frontend/src/pages/AdminSettingsPage.vue`
+- `sed -n '420,620p' frontend/src/pages/AdminSettingsPage.vue`
+- `npm run typecheck` in `backend`
+- `npm run lint` in `backend`
+- `npm run build` in `backend`
+- `npm run build` in `frontend`
+- `docker compose up -d --build app web`
+- `GET /health`
+- `GET /sub/<有效token>?target=clash`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson(db.system_state.findOne({key:\"runtime_settings\"},{payload:1}))'`
+- `rm -f frontend/tsconfig.tsbuildinfo`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/<有效token>?target=clash`: 200 OK
+- 系统设置页已新增“节点池等待时长（毫秒）”与“模板等待时长（毫秒）”
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend lint: pass
+- Backend build: pass
+- Frontend build: pass
+- App/Web rebuild: pass
+- 旧 `runtime_settings` 文档缺少新字段时默认值兼容: pass
+
+## Notes / Blockers
+
+- 本轮没有通过管理员 API 实际写入新的等待配置值，只验证了默认值兼容与页面/后端链路接通。
+- `docker compose up -d --build app web` 输出在桌面终端里较长，但最终健康检查和订阅回归均正常。
+
+## Next Step
+
+- 如需继续，我建议下一步直接把系统设置页这两个等待时长通过管理员接口保存一组新值，再做一次“删缓存后首个请求耗时变化”的对照测试。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+把订阅等待策略从“缺缓存立即 503”改成“有限等待 ready 后优先返回 200”：`ss/shadowrocket` 最多等待 Redis 节点池 5 秒，`clash/mihomo` 最多等待模板 10 秒，超时才返回 503。
+
+## Project Current Status
+
+- 已在 [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts) 增加有限等待逻辑：
+  - Redis 节点池等待上限：5 秒
+  - 模板等待上限：10 秒
+  - 轮询间隔：250ms
+- 当前请求现在会先触发恢复任务，再在请求内等待缓存 ready：
+  - `ss/shadowrocket`：等待 Redis 节点池 ready
+  - `clash/mihomo`：等待模板 ready；若节点池缺失，会先等待节点池恢复，再等待模板
+- 超时时仍返回 `503`，并补充 `Retry-After: 3` 响应头，方便订阅客户端短间隔重试。
+- 运行时验证结果：
+  - 仅删除 `sm:sub:template:26.6.107:clash` 后，首次 `GET /sub/<有效token>?target=clash` 直接返回 `200`，耗时约 `777ms`
+  - 同时删除 `sm:sub:node-pool`、`sm:sub:node-pool:meta`、`sm:sub:template:26.6.107:clash` 后，首次 `GET /sub/<有效token>?target=clash` 直接返回 `200`，耗时约 `268ms`
+  - 删除 `sm:sub:node-pool`、`sm:sub:node-pool:meta` 后，首次 `GET /sub/<有效token>?target=ss` 直接返回 `200`，耗时约 `265ms`
+- 这说明在当前恢复速度下，多数缓存缺失场景已经能被第一次请求直接“等到 ready 并成功返回”，不再需要用户手动重试第二次。
+
+## File Changes In This Round
+
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/routes/stage4.ts`
+- `sed -n '1,320p' backend/src/lib/subscription-template-cache.ts`
+- `sed -n '1,320p' backend/src/lib/node-pool.ts`
+- `npm run typecheck` in `backend`
+- `npm run lint` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d --build app`
+- `GET /health`
+- 串行删除模板键后请求 `GET /sub/<有效token>?target=clash` 并统计耗时
+- 串行删除 Redis 节点池与模板后请求 `GET /sub/<有效token>?target=clash` 并统计耗时
+- 串行删除 Redis 节点池后请求 `GET /sub/<有效token>?target=ss` 并统计耗时
+- `rm -f frontend/tsconfig.tsbuildinfo`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- 模板缺失时首次 `GET /sub/<有效token>?target=clash`: 200 OK，约 777ms
+- 节点池和模板同时缺失时首次 `GET /sub/<有效token>?target=clash`: 200 OK，约 268ms
+- 节点池缺失时首次 `GET /sub/<有效token>?target=ss`: 200 OK，约 265ms
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend lint: pass
+- Backend build: pass
+- App container rebuild/restart: pass
+- `clash` 模板缺失时有限等待后首个请求直接 200：pass
+- `clash` 节点池 + 模板缺失时有限等待后首个请求直接 200：pass
+- `ss` 节点池缺失时有限等待后首个请求直接 200：pass
+
+## Notes / Blockers
+
+- 当前恢复链路很快，所以这轮没有自然触发超时分支；超时返回 `503 + Retry-After` 的逻辑已经在代码中。
+- 如果后续要进一步调优客户端体验，可以把等待上限改成运行时配置，而不是当前的路由常量。
+
+## Next Step
+
+- 如需我继续，我可以把 `5s / 10s` 这两个等待上限提到运行时设置页里，做成可调参数。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+调整上游配置页三段缓存状态卡的显示顺序，将黄绿灯放到 `ready/running/failed` 状态文字前面，和你的“黄灯/绿灯 ready”阅读习惯保持一致。
+
+## Project Current Status
+
+- 已调整上游管理页缓存状态卡布局：
+  - 第一行左侧显示状态名称，如 `MongoDB 节点池`
+  - 第一行右侧显示“灯 + ready/running/failed”
+  - 第二行显示明细，如 `1/2 成功，共 63 个节点`
+- 现在视觉顺序已从原来的“灯 / 标签 / ready”改为“标签 / 灯 + ready”。
+- 这次只改了前端展示顺序，没有改后端状态数据结构，也没有改状态含义。
+- 前端生产构建已通过，说明模板结构和样式调整没有破坏页面编译。
+
+## File Changes In This Round
+
+- Updated: [frontend/src/pages/AdminUpstreamsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminUpstreamsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' frontend/src/pages/AdminUpstreamsPage.vue`
+- `grep -n "ready\\|lamp\\|status-dot\\|cache_state\\|MongoDB 节点池\\|Redis 节点池\\|模板状态" -n frontend/src/pages/AdminUpstreamsPage.vue`
+- `sed -n '260,340p' frontend/src/pages/AdminUpstreamsPage.vue`
+- `sed -n '640,710p' frontend/src/pages/AdminUpstreamsPage.vue`
+- `npm run build` in `frontend`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- 本轮未改后端 API，仅调整前端状态卡展示顺序
+- 上游管理页缓存状态卡已改为“灯在状态文字前”
+
+## Validation Result
+
+- Frontend build: pass
+- 状态卡顺序调整后样式编译: pass
+
+## Notes / Blockers
+
+- 本轮没有重建前端容器，因为只是 Vue 模板与样式顺序微调，先完成了本地生产构建验证。
+
+## Next Step
+
+- 如需我继续，我可以把状态卡再收紧成你前面描述的更明确文案格式，比如直接显示成 `绿灯 ready`、`黄灯 running` 的固定顺序文本。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+收紧订阅缓存链路，取消请求内兜底下发：当 `clash` 模板缺失时，只触发模板自检并返回等待；当 Redis 节点池缺失时，只触发 Redis 节点池恢复，再等待模板或节点池 ready 后由下一次请求返回。
+
+## Project Current Status
+
+- 已将订阅请求链路改为“只读取现成 Redis 缓存，不在当前请求里同步兜底恢复后直接返回”。
+- `clash/mihomo` 请求现在遵循以下规则：
+  - Redis 模板存在：直接拼接订阅信息组并返回 200。
+  - Redis 模板缺失：触发模板恢复任务，当前请求返回 503 等待。
+  - Redis 节点池缺失：触发“节点池 -> 模板”整条恢复链，当前请求返回 503 等待。
+- `ss/shadowrocket` 请求现在遵循以下规则：
+  - Redis 节点池存在：直接返回节点内容。
+  - Redis 节点池缺失：触发 Redis 节点池恢复，当前请求返回 503 等待。
+- 新增了两类“只检查当前缓存”的入口与去重恢复任务：
+  - Redis 节点池当前快照检查与后台恢复触发
+  - 模板当前缓存检查与后台恢复触发
+- 运行时验证结果：
+  - 场景 1，仅删除 `sm:sub:template:26.6.107:clash`：
+    - 第一次 `GET /sub/<有效token>?target=clash` 返回 `503`
+    - 响应文案为 `subscription template is recovering, please retry later`
+    - `cache_state.template` 切到 `running`
+    - 约 2 秒后模板键恢复，第二次请求返回 `200`
+  - 场景 2，同时删除 `sm:sub:node-pool`、`sm:sub:node-pool:meta`、`sm:sub:template:26.6.107:clash`：
+    - 第一次 `GET /sub/<有效token>?target=clash` 返回 `503`
+    - 响应文案为 `subscription template is recovering, please retry later`
+    - 后台完成 Redis 节点池恢复与模板恢复后，再次请求返回 `200`
+  - 场景 3，仅删除 `sm:sub:node-pool`、`sm:sub:node-pool:meta`：
+    - 第一次 `GET /sub/<有效token>?target=ss` 返回 `503`
+    - 响应文案为 `node pool cache is recovering, please retry later`
+    - Redis 节点池恢复后，再次请求返回 `200`
+- 当前版本仍为 `26.6.107`，Mongo `system_state.key=node_pool` 快照仍可作为 Redis 节点池恢复源。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/node-pool.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/node-pool.ts)
+- Updated: [backend/src/lib/subscription-template-cache.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-template-cache.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' backend/src/routes/stage4.ts`
+- `sed -n '260,520p' backend/src/routes/stage4.ts`
+- `sed -n '1,320p' backend/src/lib/subscription-template-cache.ts`
+- `sed -n '1,320p' backend/src/lib/node-pool.ts`
+- `sed -n '1,320p' backend/src/lib/upstream-batch-state.ts`
+- `sed -n '1,260p' backend/src/index.ts`
+- `grep -R "ensureSubscriptionTemplate\\|warmSubscriptionTemplate\\|recoverSubscriptionCaches\\|ensureNodePoolCache" -n backend/src`
+- `grep -R "getUpstreamBatchState\\|cache_state" -n backend/src/routes backend/src/lib`
+- `cat backend/package.json`
+- `npm run typecheck` in `backend`
+- `npm run lint` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d --build app`
+- `GET /health`
+- `GET /sub/<有效token>?target=clash` baseline
+- 串行删除模板键后请求 `GET /sub/<有效token>?target=clash`
+- 等待模板恢复后再次请求 `GET /sub/<有效token>?target=clash`
+- 串行删除 Redis 节点池与模板后请求 `GET /sub/<有效token>?target=clash`
+- 串行删除 Redis 节点池后请求 `GET /sub/<有效token>?target=ss`
+- 节点池恢复后再次请求 `GET /sub/<有效token>?target=ss`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已在本轮重建
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- 基线 `GET /sub/<有效token>?target=clash`: 200 OK
+- 模板缺失时首次 `GET /sub/<有效token>?target=clash`: 503，返回等待
+- 模板恢复后再次 `GET /sub/<有效token>?target=clash`: 200 OK
+- 节点池和模板同时缺失时首次 `GET /sub/<有效token>?target=clash`: 503，返回等待
+- Redis 节点池恢复后 `GET /sub/<有效token>?target=ss`: 200 OK
+- 节点池缺失时首次 `GET /sub/<有效token>?target=ss`: 503，返回等待
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend lint: pass
+- Backend build: pass
+- App container rebuild/restart: pass
+- `clash` 模板缺失不再同步兜底放行：pass
+- `clash` 节点池缺失不再同步兜底放行：pass
+- `ss` 节点池缺失不再同步兜底放行：pass
+- 后台自检恢复后再次请求成功：pass
+
+## Notes / Blockers
+
+- 仓库根目录下未找到 `subscription_manager_dev_task.md`，本轮按现有代码与项目规则继续实施，没有阻塞开发。
+- `sm:sub:upstream-batch-state` 的顶层 `phase/message` 会在恢复瞬间切到运行态，但由于后台恢复很快，单步状态值可能很快又回到 `ready`；这是可接受的瞬时表现。
+- 本轮没有改管理员页面交互文案，只改了后端等待行为与状态流转。
+
+## Next Step
+
+- 如需进一步强化“等待中不可并发击穿”，下一步可以在 [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts) 上再加一个更明确的 `Retry-After` 响应头，方便订阅客户端按固定秒数重试。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+运行时验证 Redis 节点池缓存与 `clash` 模板预缓存在丢失后，`/sub/:token` 请求是否会触发自检恢复：分别覆盖“仅模板丢失”和“节点池 + 模板同时丢失”两种场景。
+
+## Project Current Status
+
+- 当前订阅版本仍为 `26.6.107`。
+- MongoDB `system_state.key=node_pool` 快照存在，保存了当前版本 `26.6.107` 的 63 个节点，可作为 Redis 节点池恢复源。
+- 测试前 Redis 存在以下订阅缓存键：
+  - `sm:sub:node-pool`
+  - `sm:sub:node-pool:meta`
+  - `sm:sub:template:26.6.107:clash`
+  - `sm:sub:upstream-batch-state`
+- 场景 1：仅删除 `sm:sub:template:26.6.107:clash` 后，请求 `GET /sub/<有效token>?target=clash` 立即返回 200；模板键未在响应返回瞬间同步出现，但约 2 秒后已自动重建。
+- 场景 2：同时删除 `sm:sub:node-pool`、`sm:sub:node-pool:meta`、`sm:sub:template:26.6.107:clash` 后，再次请求 `GET /sub/<有效token>?target=clash`，请求仍直接返回 200，且 Redis 节点池与模板键已在该次请求完成后恢复。
+- 本轮验证说明：现有链路具备“发现 Redis 缓存缺失后，自行从 Mongo 节点池快照恢复 Redis 节点池，并继续补齐模板缓存”的能力。
+- 另一个可观察行为：模板缺失时，当前实现更接近“先保证请求成功，再后台补齐模板”，而不是“必须等模板同步回填后再返回”。
+
+## File Changes In This Round
+
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/SKILL.md`
+- `sed -n '1,220p' /vol1/1000/docker/subscription_manager/.codex/skills/subscription-manager-project/references/project-rules.md`
+- `find .. -name 'subscription_manager_dev_task.md' -o -name 'project-rules.md' -o -path '*/docs/TASK_STATE.md'`
+- `docker ps --format '{{.Names}}\\t{{.Status}}'`
+- `curl -i -s http://127.0.0.1:8084/health`
+- `docker exec shared-redis redis-cli --scan --pattern 'sm:sub:*' | sort`
+- `docker exec shared-mongo mongosh --quiet --eval 'printjson(db.adminCommand({listDatabases:1}).databases.map(d => d.name))'`
+- `docker exec subscription-manager-app printenv | grep -E 'MONGO|REDIS|DB_'`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson(db.getCollectionNames())'`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson(db.system_state.find().limit(5).toArray())'`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); const u=db.users.findOne({status:{$in:[\"active\",\"grace\"]}}); printjson(u)'`
+- `docker exec shared-redis redis-cli GET sm:sub:node-pool:meta`
+- `docker exec shared-redis redis-cli GET sm:sub:upstream-batch-state`
+- `curl -s -D /tmp/sub_headers_1.txt 'http://127.0.0.1:8084/sub/<有效token>?target=clash' -o /tmp/sub_body_1.txt`
+- `docker exec shared-redis redis-cli DEL sm:sub:template:26.6.107:clash`
+- `curl -s -D /tmp/sub_headers_2.txt 'http://127.0.0.1:8084/sub/<有效token>?target=clash' -o /tmp/sub_body_2.txt`
+- `sleep 2; docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.107:clash; docker exec shared-redis redis-cli STRLEN sm:sub:template:26.6.107:clash`
+- `docker exec shared-redis redis-cli DEL sm:sub:node-pool sm:sub:node-pool:meta sm:sub:template:26.6.107:clash`
+- `curl -s -D /tmp/sub_headers_3.txt 'http://127.0.0.1:8084/sub/<有效token>?target=clash' -o /tmp/sub_body_3.txt`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:node-pool`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:node-pool:meta`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.107:clash`
+- `git status --short`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- 基线 `GET /sub/<有效token>?target=clash`: 200 OK
+- 删除模板键后 `GET /sub/<有效token>?target=clash`: 200 OK，模板随后自动恢复
+- 删除 Redis 节点池和模板后 `GET /sub/<有效token>?target=clash`: 200 OK，节点池与模板均自动恢复
+
+## Validation Result
+
+- Redis 模板缓存丢失自检恢复：pass
+- Redis 节点池缓存丢失自检恢复：pass
+- Redis 节点池恢复后模板预缓存联动恢复：pass
+- 订阅请求在两种缓存缺失场景下均未报错：pass
+
+## Notes / Blockers
+
+- 本轮未使用管理员接口做批量刷新，只验证了运行中实例在 Redis 键缺失后的自恢复行为。
+- `sm:sub:upstream-batch-state` 在模板缺失场景下会更新 `updatedAt/message`，但请求返回时模板键不一定已同步落库，表现为后台恢复。
+- 本轮未进一步验证“Mongo 节点池快照本身缺失”时的恢复路径，因为这属于更高阶故障，不在当前测试范围内。
+
+## Next Step
+
+- 如需更严格满足“客户请求必须等待模板 ready 才返回”，下一步应检查 [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts) 与 [backend/src/lib/subscription-template-cache.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-template-cache.ts) 中的恢复流程，确认是否仍保留了按需转换或后台预热放行逻辑。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+按“实际只有 `clash` target、没有 `mihomo`”的口径收敛模板缓存：默认预热目标只保留 `clash`，上游配置页模板状态应显示 `1/1`，并验证新版本 Redis 不再生成 `mihomo` 模板。
+
+## Project Current Status
+
+- 已将默认模板预热目标从 `clash + mihomo` 收敛为仅 `clash`。
+- 已将模板缓存 key 标准化：即便旧客户端手动传入 `target=mihomo`，也复用 `clash` 模板 key，不再生成独立 `mihomo` 模板缓存。
+- 已将上游批量刷新流程里的模板总数从硬编码 `2` 改为读取默认模板目标数量，当前为 `1`。
+- 已从管理员设置页的默认订阅格式选项中移除 `Mihomo`。
+- 已重建并重启 `subscription-manager-app` 与 `subscription-manager-web`。
+- 已重新执行 `POST /api/admin/upstreams/test-all`，订阅版本从 `26.6.106` 更新到 `26.6.107`。
+- 三段缓存状态验证：
+  - MongoDB 节点池：ready，`1/2` 成功，共 63 个节点。
+  - Redis 节点池：ready，`1/2` 成功，共 63 个节点。
+  - 模板状态：ready，`1/1` 模板。
+- Redis 当前版本模板验证：
+  - `sm:sub:template:26.6.107:clash`: exists
+  - `sm:sub:template:26.6.107:mihomo`: not exists
+- 有效用户订阅回归：`clash` 和 `ss` 均返回 200，版本均为 `26.6.107`，节点数均为 63。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/subscription-template-cache.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-template-cache.ts)
+- Updated: [backend/src/services/upstream-batch-runner.ts](/vol1/1000/docker/subscription_manager/backend/src/services/upstream-batch-runner.ts)
+- Updated: [frontend/src/pages/AdminSettingsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminSettingsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `grep -RIn --exclude-dir=node_modules --exclude-dir=.git -E "mihomo|target.*clash|targetOptions|shadowrocket|sing-box" backend/src frontend/src`
+- `sed -n '1,260p' backend/src/lib/subscription-template-cache.ts`
+- `sed -n '1,260p' frontend/src/pages/DashboardPage.vue`
+- `sed -n '190,214p' frontend/src/pages/AdminSettingsPage.vue`
+- `grep -RIn --exclude-dir=node_modules --exclude-dir=.git "total: 2\\|mihomo" backend/src frontend/src`
+- `npm run typecheck` in `backend`
+- `npm run lint` in `backend`
+- `npm run typecheck` in `frontend`
+- `npm run build` in `backend`
+- `npm run build` in `frontend`
+- `docker compose up -d --build app web`
+- `docker compose up -d --build app`
+- `curl -sS -i --max-time 15 http://localhost:8084/health | sed -n '1,20p'`
+- `POST /api/auth/login` with local admin credentials; full credentials not printed.
+- `POST /api/admin/upstreams/test-all` with admin cookie; summarized NDJSON only.
+- `GET /api/admin/upstreams` with admin cookie; summarized `cache_state`.
+- `docker exec shared-redis redis-cli --raw keys 'sm:sub:template:26.6.107:*'`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.107:mihomo`
+- `docker exec shared-redis redis-cli EXISTS sm:sub:template:26.6.107:clash`
+- `docker exec shared-redis redis-cli --raw keys 'sm:sub:template:26.6.107:*' | sort`
+- `GET /sub/<有效token>?target=clash`
+- `GET /sub/<有效token>?target=ss`
+- `git status --short`
+- `git diff --stat`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up, rebuilt in this round
+- `subscription-manager-web`: Up, rebuilt in this round
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `POST /api/auth/login`: 200 OK
+- `POST /api/admin/upstreams/test-all`: completed, summary `total=2 success=1 failed=1 nodeCount=63 version=26.6.107`
+- `GET /api/admin/upstreams`: cache state phase `ready`; template `total=1 success=1`
+- `GET /sub/<有效token>?target=clash`: 200 OK, `X-Subscription-Version=26.6.107`, 63 `server:` lines, 1 subscription info group
+- `GET /sub/<有效token>?target=ss`: 200 OK, `X-Subscription-Version=26.6.107`, base64 decoded node count 63, version marker present once
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend lint: pass
+- Frontend typecheck: pass
+- Backend build: pass
+- Frontend build: pass
+- Docker rebuild/restart: pass
+- Template status `1/1`: pass
+- Current-version `mihomo` template absence: pass
+- Template key list contains only `sm:sub:template:26.6.107:clash`: pass
+- `clash` / `ss` subscription regression: pass
+
+## Notes / Blockers
+
+- One upstream still failed during batch testing; successful upstream produced the ready 63-node pool.
+- Backend still contains compatibility handling for manual `target=mihomo` in older route branches, but template cache key normalization now prevents independent `mihomo` template cache creation.
+- Full admin password, full subscription token, and full upstream URLs were not printed.
+
+## Next Step
+
+- 如需完全禁止手动 `target=mihomo` query，可再加一层后端 target 白名单，让非 `clash`/`ss` 目标直接返回不支持；本轮只移除了默认配置和预热模板里的 `mihomo`。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+部署并运行时验证订阅缓存三段 ready 链路：重建 app/web 容器，执行上游全部测试，确认 MongoDB 节点池、Redis 节点池、模板缓存均 ready，并回归 `clash`、`mihomo`、`ss` 订阅输出。
+
+## Project Current Status
+
+- 已执行 `docker compose up -d --build app web`，`subscription-manager-app` 和 `subscription-manager-web` 已重建并重启。
+- 管理员登录成功，`POST /api/admin/upstreams/test-all` 已完成。
+- 上游测试结果：共 2 条上游，1 条成功，1 条失败，生成 63 个节点。
+- 订阅版本已从 `26.6.105` 更新到 `26.6.106`。
+- 三段缓存状态均 ready：
+  - MongoDB 节点池：ready，`1/2` 成功，共 63 个节点。
+  - Redis 节点池：ready，`1/2` 成功，共 63 个节点。
+  - 模板状态：ready，`2/2` 模板。
+- Redis 中已存在 `sm:sub:template:26.6.106:clash` 与 `sm:sub:template:26.6.106:mihomo`，两者长度均约 202775 字节。
+- MongoDB `system_state.node_pool` 已保存当前版本 `26.6.106`、63 个节点和节点池 hash。
+- 有效用户订阅回归通过：`clash`、`mihomo`、`ss` 均返回 200，版本均为 `26.6.106`，节点数均为 63。
+
+## File Changes In This Round
+
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' compose.yaml`
+- `docker compose ps`
+- `git status --short`
+- `docker compose up -d --build app web`
+- `curl -sS -i --max-time 15 http://localhost:8084/health | sed -n '1,20p'`
+- `curl -sS -i --max-time 15 http://localhost:8084/config | sed -n '1,20p'`
+- `docker logs --since=2m subscription-manager-app | tail -n 80`
+- Admin login through `POST /api/auth/login` using local `.env` credentials; full credentials not printed.
+- `POST /api/admin/upstreams/test-all` with admin cookie; summarized NDJSON phase/result/summary only.
+- `GET /api/admin/upstreams` with admin cookie; summarized `cache_state`.
+- `docker exec shared-redis redis-cli --raw keys 'sm:sub:template:26.6.106:*'`
+- `docker exec shared-redis redis-cli --raw get sm:sub:node-pool:meta`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'const s=db.system_state.findOne({key:"node_pool"},...)'`
+- Queried MongoDB for one active/grace user token internally; full token not printed.
+- `GET /sub/<有效token>?target=clash`
+- `GET /sub/<有效token>?target=mihomo`
+- `GET /sub/<有效token>?target=ss`
+- `curl -sS -i --max-time 15 http://localhost:8084/admin/upstreams | sed -n '1,20p'`
+- `docker logs --since=5m subscription-manager-app | tail -n 120`
+- `docker logs --since=5m subscription-manager-subconverter | tail -n 80`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up, rebuilt in this round
+- `subscription-manager-web`: Up, rebuilt in this round
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /config`: 200 OK
+- `GET /admin/upstreams`: 200 OK, serves rebuilt frontend asset `index-nLqDlqtt.js`
+- `POST /api/auth/login`: 200 OK
+- `POST /api/admin/upstreams/test-all`: completed, summary `total=2 success=1 failed=1 nodeCount=63 version=26.6.106`
+- `GET /api/admin/upstreams`: cache state phase `ready`; MongoDB/Redis/template all ready
+- `GET /sub/<有效token>?target=clash`: 200 OK, `X-Subscription-Version=26.6.106`, 63 `server:` lines, 1 subscription info group, 1 `proxy-groups` section
+- `GET /sub/<有效token>?target=mihomo`: 200 OK, `X-Subscription-Version=26.6.106`, 63 `server:` lines, 1 subscription info group, 1 `proxy-groups` section
+- `GET /sub/<有效token>?target=ss`: 200 OK, `X-Subscription-Version=26.6.106`, base64 decoded node count 63, version marker present once
+
+## Validation Result
+
+- Docker rebuild/restart: pass
+- Health/config: pass
+- Admin login: pass
+- Upstream batch refresh: pass with one upstream failure tolerated; node pool ready from successful upstream
+- MongoDB node pool ready state: pass
+- Redis node pool ready state: pass
+- Template ready state: pass
+- Frontend admin upstream page entry: pass
+- Subscription clash/mihomo/ss regression: pass
+
+## Notes / Blockers
+
+- One upstream failed during batch testing; current node pool remains ready from the successful upstream with 63 nodes.
+- Subconverter logs confirm template warmup calls occurred during the batch refresh. User subscription requests after ready returned from cached template path by behavior and response checks.
+- Full admin password, full subscription token, and full upstream URLs were not included in this task state update.
+
+## Next Step
+
+- 如需进一步验证缓存自愈，可在明确确认后只删除当前版本 Redis 节点池/模板缓存 key，再验证应用能从 MongoDB 回填 Redis 并重新预热模板；本轮未主动清 Redis 缓存以避免影响线上可用状态。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+实现订阅缓存三段 ready 链路：MongoDB 节点池持久真源、Redis 节点池热缓存、订阅转换模板预缓存，并把上游配置页原 `notice success` 改为 MongoDB/Redis/模板三段黄灯/绿灯状态展示。
+
+## Project Current Status
+
+- 已新增节点池 MongoDB 持久化快照，Redis 节点池缓存带版本/hash 元数据，并支持 Redis 缺失时从 MongoDB 按当前版本自愈回填。
+- 已新增版本化订阅模板缓存，默认预热 `clash` / `mihomo`；客户请求转换类订阅时只读取模板缓存，再拼接用户订阅信息组，不再直接走现场转换返回。
+- 上游批量刷新流程已改为 `MongoDB ready -> Redis ready -> Template ready`，每段状态写入统一 cache state。
+- 服务启动后会异步尝试恢复当前版本 Redis 节点池与模板缓存。
+- 上游配置页已改为展示三段状态卡片：MongoDB 节点池、Redis 节点池、模板状态；running 为黄灯，ready 为绿灯，failed 为红灯。
+- 本轮未重启或重建运行中的 Docker app 容器；运行环境健康检查仍是当前已启动版本，源码变更已通过本地构建验证。
+
+## File Changes In This Round
+
+- Added: [backend/src/lib/subscription-template-cache.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-template-cache.ts)
+- Updated: [backend/src/lib/node-pool.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/node-pool.ts)
+- Updated: [backend/src/lib/upstream-batch-state.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/upstream-batch-state.ts)
+- Updated: [backend/src/services/upstream-batch-runner.ts](/vol1/1000/docker/subscription_manager/backend/src/services/upstream-batch-runner.ts)
+- Updated: [backend/src/routes/stage3.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage3.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [backend/src/routes/auth.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/auth.ts)
+- Updated: [backend/src/routes/stage6.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage6.ts)
+- Updated: [backend/src/index.ts](/vol1/1000/docker/subscription_manager/backend/src/index.ts)
+- Updated: [frontend/src/pages/AdminUpstreamsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminUpstreamsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+- Note: [backend/src/lib/subscription-display.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-display.ts) was already modified in the worktree before this cache round and was preserved.
+
+## Commands Executed In This Round
+
+- `sed -n '1,180p' .codex/skills/subscription-manager-project/SKILL.md`
+- `grep -RIn --exclude-dir=node_modules --exclude-dir=.git -E "notice|success|batch_test|upstream|test-all|test all|上游|成功|节点" frontend/src backend/src/routes/stage3.ts backend/src/services/upstream-batch-runner.ts backend/src/lib/upstream-batch-state.ts`
+- `sed -n '1,620p' frontend/src/pages/AdminUpstreamsPage.vue`
+- `sed -n '1,340p' backend/src/routes/stage3.ts`
+- `sed -n '1,360p' backend/src/services/upstream-batch-runner.ts`
+- `sed -n '520,660p' backend/src/routes/stage4.ts`
+- `npm run typecheck` in `backend`
+- `npm run typecheck` in `frontend`
+- `npm run build` in `backend`
+- `npm run build` in `frontend`
+- `npm run lint` in `backend`
+- `docker ps --format 'table {{.Names}}\\t{{.Status}}' | grep -E 'subscription-manager-(app|web|subconverter)|shared-(mongo|redis)|gateway-caddy'`
+- `curl -sS -i --max-time 10 http://localhost:8084/health | sed -n '1,20p'`
+- `curl -sS -i --max-time 10 http://localhost:8084/config | sed -n '1,20p'`
+- `git status --short`
+- `git diff --stat`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up 5 hours
+- `subscription-manager-web`: Up 2 days
+- `subscription-manager-subconverter`: Up 2 days
+- `shared-mongo`: Up 2 days
+- `shared-redis`: Up 2 days
+- `gateway-caddy`: Up 2 days
+- 本轮未执行 `docker compose up` 或容器重启。
+
+## API/Interface Status
+
+- `GET http://localhost:8084/health`: 200 OK
+- `GET http://localhost:8084/config`: 200 OK
+- 新增缓存链路尚未部署到运行中的 app 容器，因此 `/sub/:token` 新模板路径与上游页三段状态未做运行时接口回归。
+- 本地源码验证：backend typecheck pass，frontend typecheck pass，backend lint pass，backend build pass，frontend build pass。
+
+## Validation Result
+
+- Backend typecheck: pass
+- Frontend typecheck: pass
+- Backend lint: pass
+- Backend build: pass
+- Frontend build: pass
+
+## Notes / Blockers
+
+- 运行时验证需要重建并重启 `subscription-manager-app` / 前端镜像后再执行；本轮按要求未自动重启容器。
+- 旧版本模板不会作为当前版本读取；新版本刷新后若模板预热失败，客户请求会等待/返回 503，而不会现场转换返回。
+
+## Next Step
+
+- 重建并重启 app/web 后，执行一次 `POST /api/admin/upstreams/test-all`，确认 MongoDB/Redis/模板三段状态依次由 running 变 ready，并用有效 token 回归 `clash`、`mihomo`、`ss` 订阅请求。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+完成这轮代码后的自我测试：重建后端镜像、重启 `subscription-manager-app`，并验证 `clash/mihomo` 过期响应保留订阅信息策略组且组名末尾追加提示语，同时回归正常 `clash` 与 `ss` 输出。当前已完成。
+
+## Project Current Status
+
+- `subscription-manager-app` 已按最新源码重建并重启。
+- `target=clash` / `target=mihomo` 的过期响应已验证为 200，且仅保留订阅信息策略组。
+- 过期态组名末尾已追加 `订阅已过期，请兑换有效期或联系管理员`。
+- 正常 `target=clash` 已回归成功，响应体仍包含完整节点与置顶订阅信息组。
+- `target=ss` 已回归成功。
+- 已临时插入并清理一个 `inactive + sub_token` 测试账号，未授权订阅分支已验证通过。
+
+## File Changes In This Round
+
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `docker ps --format 'table {{.Names}}\\t{{.Status}}' | grep -E 'subscription-manager-(app|web|subconverter)|shared-(mongo|redis)|gateway-caddy'`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'db.users.find({status: {$in: ["inactive", "expired", "active"]}, sub_token: {$exists: true, $ne: ""}}, {username:1, status:1, sub_token:1, expire_at:1, disable_after:1}).limit(10).toArray().forEach(u => print(JSON.stringify(u)))'`
+- `curl -sS -i http://localhost:8084/health | sed -n '1,20p'`
+- `sed -n '1,220p' backend/src/routes/stage4.ts`
+- `sed -n '1,220p' backend/src/lib/subscription-display.ts`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `sed -n '1,220p' backend/Dockerfile`
+- `docker image inspect subscription-manager-app:latest --format '{{.Id}} {{.Created}}'`
+- `docker compose up -d --build app`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'db.users.find({status: "inactive", sub_token: {$exists: true, $ne: null, $ne: ""}}, {username:1, status:1, sub_token:1, expire_at:1, disable_after:1}).limit(5).toArray().forEach(u => print(JSON.stringify(u)))'`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'db.users.findOne({username: "test0003"}, {username:1, status:1, sub_token:1, expire_at:1, disable_after:1})'`
+- `curl -sS -D - "http://localhost:8084/sub/RLqZjMY81j?target=clash" -o /tmp/sub_expired_clash.yaml`
+- `curl -sS -D - "http://localhost:8084/sub/RLqZjMY81j?target=mihomo" -o /tmp/sub_expired_mihomo.yaml`
+- `curl -sS -D - "http://localhost:8084/sub/qDI0k6111B?target=clash" -o /tmp/sub_active_clash.yaml`
+- `curl -sS -D - "http://localhost:8084/sub/qDI0k6111B?target=ss" -o /tmp/sub_active_ss.txt`
+- `docker logs --since=5m subscription-manager-app | tail -n 80`
+- `docker logs --since=5m subscription-manager-subconverter | tail -n 80`
+- `curl -sS --max-time 30 -D - "http://localhost:8084/sub/qDI0k6111B?target=clash" -o /tmp/sub_active_clash_retry.yaml`
+- `docker logs --since=2m subscription-manager-app | tail -n 60`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'db.users.insertOne({username:"codexInactiveProbe", password_hash:"x", contact:null, note:"temp test user", sub_token:"codexInactiveProbeTok", status:"inactive", expire_at:null, disable_after:null, created_at:new Date(), updated_at:new Date(), last_login_at:null})'`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'printjson(db.users.findOne({username:"codexInactiveProbe"}, {username:1, status:1, sub_token:1, expire_at:1, disable_after:1, created_at:1, updated_at:1, note:1}))'`
+- `curl -sS "http://localhost:8084/sub/codexInactiveProbeTok?target=clash" -o /tmp/inactive_clash.yaml`
+- `curl -sS "http://localhost:8084/sub/codexInactiveProbeTok?target=mihomo" -o /tmp/inactive_mihomo.yaml`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'printjson(db.users.deleteOne({username:"codexInactiveProbe"}))'`
+- `docker exec shared-mongo mongosh subscription_manager --quiet --eval 'printjson(db.users.findOne({username:"codexInactiveProbe"}, {username:1, sub_token:1, status:1}))'`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up, rebuilt from the latest local source
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /health`: 200 OK
+- `GET /sub/RLqZjMY81j?target=clash`: 200 OK, empty-node YAML with single info group and expired suffix
+- `GET /sub/RLqZjMY81j?target=mihomo`: 200 OK, same as clash
+- `GET /sub/qDI0k6111B?target=clash`: 200 OK after retry, normal subscription payload unchanged
+- `GET /sub/qDI0k6111B?target=ss`: 200 OK, normal SS payload unchanged
+- `GET /sub/codexInactiveProbeTok?target=clash`: 200 OK, empty-node YAML with single info group and inactive suffix
+- `GET /sub/codexInactiveProbeTok?target=mihomo`: 200 OK, same as clash
+- Expired clash/mihomo body checks: info group present, `- DIRECT` present, node line count `0`, `proxy-groups` count `1`
+- Active clash body checks: HTTP `200`, info group present, `server` count `63`, `proxy-groups` count `20`
+- Inactive clash/mihomo body checks: info group present, node line count `0`, `proxy-groups` count `1`, suffix `账号未授权，请兑换授权码`
+
+## Validation Result
+
+- Docker rebuild: pass
+- Expired clash/mihomo output: pass
+- Normal clash output: pass
+- SS output: pass
+
+## Notes / Blockers
+
+- No blocker on the implemented change.
+- 无阻塞；未授权分支已通过临时测试账号验证。
+
+## Next Step
+
+- 如需更强回归，可以再补一个拥有 `sub_token` 的未授权测试账号，再回放一次 `target=clash/mihomo`。
+
+## Date
+
+2026-06-11
+
+## Round Goal
+
+优化 `/sub/:token` 在 `target=clash` / `target=mihomo` 的过期与未授权输出：保留空节点配置，只保留置顶订阅信息策略组，并允许在组名末尾追加状态提示文案。当前已完成。
+
+## Project Current Status
+
+- `backend/src/lib/subscription-display.ts` 已支持订阅信息组标题追加可选后缀。
+- `backend/src/routes/stage4.ts` 已将 `clash/mihomo` 的空订阅响应改为保留订阅信息策略组的最小 YAML。
+- 过期态组名后缀已更新为 `订阅已过期，请兑换有效期或联系管理员`。
+- 未授权、已禁用态仍保留各自状态提示后缀，避免语义混淆。
+- 正常订阅成功态未改动。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/subscription-display.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/subscription-display.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,220p' backend/src/lib/subscription-display.ts`
+- `sed -n '1,220p' docs/TASK_STATE.md`
+- `sed -n '1,120p' backend/src/routes/stage4.ts`
+- `sed -n '1,200p' backend/src/lib/shanghai-date.ts`
+- `sed -n '1,220p' frontend/src/pages/DashboardPage.vue`
+- `cat backend/package.json`
+- `npm run typecheck`
+
+## Docker/Container Status
+
+- 本轮未修改 Docker/Compose 配置。
+- 本轮未重新启动容器或执行 compose 调试。
+- 现有容器状态未重新核验。
+
+## API/Interface Status
+
+- 本轮未实际请求 `/sub/:token` 接口回放验证。
+- 代码路径已覆盖 `clash` / `mihomo` 的空订阅返回。
+
+## Validation Result
+
+- TypeScript typecheck: pass
+
+## Notes / Blockers
+
+- 无阻塞。
+
+## Next Step
+
+- 如需，我可以继续补一轮实际接口验证，确认 `clash` / `mihomo` 的返回 YAML 头部和信息组文案。
+
+## Date
+
 2026-06-09
 
 ## Round Goal

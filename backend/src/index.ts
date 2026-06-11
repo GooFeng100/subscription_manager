@@ -14,6 +14,8 @@ import { boolFromEnv } from "./lib/utils.js";
 import { getRuntimeSettings } from "./lib/runtime-settings.js";
 import { startUpstreamAutoPolling } from "./services/upstream-poller.js";
 import { startActivationCodeExpiryJob } from "./services/activation-code-expiry.js";
+import { recoverSubscriptionCaches } from "./lib/subscription-template-cache.js";
+import { getCurrentSubVersion } from "./services/subscription-version.js";
 
 async function bootstrap() {
   await connectDb();
@@ -88,6 +90,12 @@ async function bootstrap() {
 
   app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`subscription-manager-backend listening on ${env.PORT}`);
+    void (async () => {
+      const current = await getCurrentSubVersion();
+      await recoverSubscriptionCaches(current.version);
+    })().catch((error) => {
+      console.error("subscription cache recovery failed:", error);
+    });
   });
 
   startUpstreamAutoPolling();

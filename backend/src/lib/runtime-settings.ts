@@ -17,6 +17,8 @@ const runtimeSettingsSchema = z.object({
   upstream_poll_interval_minutes: z.number().int().nonnegative().default(env.UPSTREAM_POLL_INTERVAL_MINUTES),
   upstream_fetch_proxy_url: z.string().default(env.UPSTREAM_FETCH_PROXY_URL || DEFAULT_UPSTREAM_FETCH_PROXY_URL),
   sub_rate_limit_per_minute: z.number().int().positive().default(env.SUB_RATE_LIMIT_PER_MINUTE),
+  sub_wait_node_pool_ms: z.number().int().min(0).max(60000).default(1500),
+  sub_wait_template_ms: z.number().int().min(0).max(120000).default(3000),
   login_fail_limit: z.number().int().positive().default(env.LOGIN_FAIL_LIMIT),
   login_lock_minutes: z.number().int().positive().default(env.LOGIN_LOCK_MINUTES),
   register_ip_limit: z.number().int().positive().default(env.REGISTER_IP_LIMIT),

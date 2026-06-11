@@ -7,7 +7,17 @@
       </div>
     </div>
 
-    <p v-if="notice" class="notice" :class="noticeKind">{{ notice }}</p>
+    <div class="cache-status-panel" role="status" aria-live="polite">
+      <div v-for="step in cacheSteps" :key="step.key" class="cache-status-card" :class="`is-${step.tone}`">
+        <span class="cache-label">{{ step.label }}</span>
+        <strong class="cache-state">
+          <span class="cache-lamp" :class="`is-${step.tone}`" aria-hidden="true"></span>
+          <span>{{ step.statusText }}</span>
+        </strong>
+        <small>{{ step.detail }}</small>
+      </div>
+    </div>
+    <p v-if="notice && noticeKind !== 'success'" class="notice" :class="noticeKind">{{ notice }}</p>
 
     <div class="filters">
       <input id="upstreams-filter-name" name="upstreamsFilterName" v-model="qName" placeholder="筛选上游名称" />
@@ -178,9 +188,28 @@ type Item = {
   updated_at: string;
 };
 
+type CacheStepState = {
+  status?: 'idle' | 'running' | 'ready' | 'failed';
+  ready?: boolean;
+  total?: number;
+  success?: number;
+  nodeCount?: number;
+  version?: string | null;
+  message?: string | null;
+};
+
+type CacheState = {
+  phase?: string;
+  version?: string | null;
+  mongo_node_pool?: CacheStepState;
+  redis_node_pool?: CacheStepState;
+  template?: CacheStepState;
+};
+
 const items = ref<Item[]>([]);
 const notice = ref('');
 const noticeKind = ref<'info' | 'success' | 'error'>('info');
+const cacheState = ref<CacheState>({});
 const qName = ref('');
 const qStatus = ref('');
 const batching = ref(false);
@@ -216,6 +245,61 @@ const filteredItems = computed(() => items.value.filter((u) => {
   const okStatus = qStatus.value ? (qStatus.value === 'enabled' ? u.enabled : !u.enabled) : true;
   return okName && okStatus;
 }));
+
+function normalizeCacheStep(step?: CacheStepState): Required<Pick<CacheStepState, 'status' | 'ready' | 'total' | 'success' | 'nodeCount'>> & { message: string } {
+  const status = step?.status || (step?.ready ? 'ready' : 'idle');
+  return {
+    status,
+    ready: step?.ready ?? status === 'ready',
+    total: Number(step?.total || 0),
+    success: Number(step?.success || 0),
+    nodeCount: Number(step?.nodeCount || 0),
+    message: String(step?.message || '')
+  };
+}
+
+function cacheTone(status: string) {
+  if (status === 'ready') return 'ready';
+  if (status === 'running') return 'running';
+  if (status === 'failed') return 'failed';
+  return 'idle';
+}
+
+function statusLabel(status: string) {
+  if (status === 'ready') return 'ready';
+  if (status === 'running') return 'running';
+  if (status === 'failed') return 'failed';
+  return 'idle';
+}
+
+const cacheSteps = computed(() => {
+  const mongo = normalizeCacheStep(cacheState.value.mongo_node_pool);
+  const redis = normalizeCacheStep(cacheState.value.redis_node_pool);
+  const template = normalizeCacheStep(cacheState.value.template);
+  return [
+    {
+      key: 'mongo',
+      label: 'MongoDB 节点池',
+      tone: cacheTone(mongo.status),
+      statusText: statusLabel(mongo.status),
+      detail: `${mongo.success}/${mongo.total} 成功，共 ${mongo.nodeCount} 个节点`
+    },
+    {
+      key: 'redis',
+      label: 'Redis 节点池',
+      tone: cacheTone(redis.status),
+      statusText: statusLabel(redis.status),
+      detail: `${redis.success}/${redis.total} 成功，共 ${redis.nodeCount} 个节点`
+    },
+    {
+      key: 'template',
+      label: '模板状态',
+      tone: cacheTone(template.status),
+      statusText: statusLabel(template.status),
+      detail: template.total > 0 ? `${template.success}/${template.total} 模板` : (template.message || '等待节点池 ready')
+    }
+  ];
+});
 
 function fmtDay(value: string | null | undefined) {
   if (!value) return '-';
@@ -472,7 +556,9 @@ async function loadUpstreams() {
       batch_test_success?: number;
       batch_test_failed?: number;
       batch_test_node_count?: number;
+      cache_state?: CacheState;
     }>('/api/admin/upstreams');
+    cacheState.value = data.cache_state || {};
     batching.value = !!data.batch_test_running;
     if (batching.value) {
       ensureRefreshTimer();
@@ -553,6 +639,54 @@ onBeforeUnmount(() => {
 h1 { margin: 0; color: #0f172a; }
 .sub { margin: 6px 0 0; color: #64748b; }
 .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; }
+.cache-status-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.cache-status-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 8px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.cache-status-card strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+.cache-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+.cache-status-card small {
+  grid-column: 1 / 3;
+  color: #64748b;
+  font-size: 12px;
+}
+.cache-status-card.is-running { border-color: #fcd34d; background: #fffbeb; }
+.cache-status-card.is-ready { border-color: #bbf7d0; background: #f0fdf4; }
+.cache-status-card.is-failed { border-color: #fecaca; background: #fef2f2; }
+.cache-status-card.is-idle { background: #f8fafc; }
+.cache-lamp {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+.cache-lamp.is-running { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18); }
+.cache-lamp.is-ready { background: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.16); }
+.cache-lamp.is-failed { background: #dc2626; box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16); }
+.cache-label { color: #334155; font-size: 13px; font-weight: 700; }
 .notice { margin: 0 0 10px; font-size: 14px; }
 .notice.info { color: #1d4ed8; }
 .notice.success { color: #15803d; }
@@ -698,6 +832,7 @@ tbody tr:hover { background: #f3f7ff; }
 }
 @media (max-width: 760px) {
   .filters { grid-template-columns: 1fr; }
+  .cache-status-panel { grid-template-columns: 1fr; }
   .modal { width: calc(100vw - 24px); min-width: 0; }
   .filters button { min-height: 40px; }
 }

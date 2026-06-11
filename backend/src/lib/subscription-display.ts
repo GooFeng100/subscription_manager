@@ -1,8 +1,10 @@
 export const SUBSCRIPTION_INFO_GROUP_PREFIX = "📌 订阅信息｜";
 export const NODE_LINE_RE = /^(?:ss|trojan|vmess|vless|ssr|hysteria2|tuic):\/\//i;
 
-export function buildSubscriptionInfoName(params: { version: string; expireDate: string }) {
-  return `${SUBSCRIPTION_INFO_GROUP_PREFIX}V${params.version}｜到期 ${params.expireDate}`;
+export function buildSubscriptionInfoName(params: { version: string; expireDate: string; suffix?: string }) {
+  const base = `${SUBSCRIPTION_INFO_GROUP_PREFIX}V${params.version}｜到期 ${params.expireDate}`;
+  const suffix = String(params.suffix || "").trim();
+  return suffix ? `${base}｜${suffix}` : base;
 }
 
 function countLeadingSpaces(line: string) {
