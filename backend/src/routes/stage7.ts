@@ -339,6 +339,7 @@ router.get("/admin/logs/sub-access", requireAdmin, async (req, res) => {
       status_code: doc.status_code,
       success: doc.success,
       message: doc.message,
+      response_time_ms: doc.response_time_ms ?? null,
       created_at: doc.created_at
     }))
   });

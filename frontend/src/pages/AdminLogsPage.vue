@@ -100,7 +100,7 @@
           <table class="table logs-table">
             <thead>
               <tr>
-                <th>时间</th><th>用户名</th><th>token</th><th>目标</th><th>IP</th><th>状态码</th><th>结果</th><th>消息</th>
+                <th>时间</th><th>用户名</th><th>token</th><th>目标</th><th>IP</th><th>状态码</th><th>响应时间</th><th>结果</th><th>消息</th>
               </tr>
             </thead>
             <tbody>
@@ -111,11 +111,12 @@
                 <td>{{ r.target }}</td>
                 <td>{{ r.ip }}</td>
                 <td>{{ r.status_code }}</td>
+                <td>{{ fmtDurationMs(r.response_time_ms) }}</td>
                 <td><span class="status" :class="r.success ? 'is-ok' : 'is-bad'">{{ r.success ? '成功' : '失败' }}</span></td>
                 <td>{{ logMessageLabel(r.message) }}</td>
               </tr>
-              <tr v-if="loadingSub" class="empty-row"><td colspan="8">加载中...</td></tr>
-              <tr v-else-if="subRows.length === 0" class="empty-row"><td colspan="8">暂无日志</td></tr>
+              <tr v-if="loadingSub" class="empty-row"><td colspan="9">加载中...</td></tr>
+              <tr v-else-if="subRows.length === 0" class="empty-row"><td colspan="9">暂无日志</td></tr>
             </tbody>
           </table>
         </div>
@@ -141,7 +142,7 @@ import { api, fmtDateOnly } from '../lib/api';
 type Tab = 'auth' | 'code' | 'sub';
 type AuthRow = { id: string; username: string; action: string; success: boolean; message: string; ip: string; created_at: string };
 type CodeRow = { id: string; code: string; mode?: 'add_days' | 'fixed_expire_date' | string; duration_days?: number; fixedExpireDate?: string | null; oldExpireAt?: string | null; newExpireAt?: string | null; revokeReason?: string | null; status: 'used' | 'revoked' | string; used_by_username: string | null; used_at: string | null; revoked_at: string | null; note: string | null };
-type SubRow = { id: string; username: string | null; token: string; target: string; ip: string; status_code: number; success: boolean; message: string; created_at: string };
+type SubRow = { id: string; username: string | null; token: string; target: string; ip: string; status_code: number; success: boolean; message: string; response_time_ms?: number | null; created_at: string };
 type PaginatedResponse<T> = { items: T[]; total?: number; page?: number; pageSize?: number };
 
 const PAGE_SIZE = 10;
@@ -192,6 +193,11 @@ function fmtDayTime(v: string | null | undefined) {
 
 function fmtDay(v: string | null | undefined) {
   return fmtDateOnly(v);
+}
+
+function fmtDurationMs(v: number | null | undefined) {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+  return `${Math.max(0, Math.round(Number(v)))} ms`;
 }
 
 function maskToken(token: string) {

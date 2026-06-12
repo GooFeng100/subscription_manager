@@ -114,6 +114,7 @@ export type SubAccessLogDoc = {
   status_code: number;
   success: boolean;
   message: string;
+  response_time_ms?: number | null;
   created_at: Date;
 };
 

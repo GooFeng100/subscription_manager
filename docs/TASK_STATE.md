@@ -6,6 +6,134 @@
 
 ## Round Goal
 
+把订阅访问日志的保留上限收紧到 1000 条，超过后自动覆盖最早的记录。
+
+## Project Current Status
+
+- 订阅访问日志写入链路已改成“写入后清理最旧记录”
+- `sub_access_logs` 已限制为最多保留 1000 条
+- 超过 1000 条后，会优先删除最早的旧日志，保留最新 1000 条
+- 离线验证已经通过，临时集合在插入 1002 条后清理到了 1000 条
+- 真实日志表当前仍是 280 条，没有被这次验证影响
+
+## File Changes In This Round
+
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '280,360p' backend/src/routes/stage4.ts`
+- `grep -RIn "response_time_ms\\|sub_access_logs" backend/src --exclude-dir=node_modules --exclude-dir=dist`
+- `npm run typecheck` in `backend`
+- `npm run build` in `backend`
+- `docker compose up -d app`
+- `docker exec shared-mongo mongosh --quiet --eval '...1002 test docs...'`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson({count: db.sub_access_logs.countDocuments({}), estimated: db.sub_access_logs.estimatedDocumentCount()})'`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `sub_access_logs` is still the source for admin subscription access logs
+- Retention behavior revalidated with a temporary Mongo collection
+
+## Validation Result
+
+- Backend typecheck: pass
+- Backend build: pass
+- Retention logic offline validation: pass
+- Real log count unchanged at 280: pass
+
+## Notes / Blockers
+
+- No blocker remains for this change.
+
+## Next Step
+
+- Run backend typecheck/build, restart the app, then confirm the log count stays at or under 1000 after a new access log is written.
+
+## Date
+
+2026-06-12
+
+## Round Goal
+
+给订阅访问日志增加“请求响应时间”列，并确保这个耗时是从客户端发起请求到服务器完成响应的整段时间。
+
+## Project Current Status
+
+- 已在订阅访问日志落库字段中新增 `response_time_ms`
+- 已把订阅请求链路改成在响应结束后再写日志，耗时覆盖完整请求处理过程
+- 已把管理后台的订阅访问日志表格新增“响应时间”列
+- 旧日志如果还没有该字段，前端会显示 `-`，不会影响历史数据查看
+- 真实请求验证已通过，最新访问日志里已能看到 `response_time_ms: 30`
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/db.ts](/vol1/1000/docker/subscription_manager/backend/src/lib/db.ts)
+- Updated: [backend/src/routes/stage4.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage4.ts)
+- Updated: [backend/src/routes/stage7.ts](/vol1/1000/docker/subscription_manager/backend/src/routes/stage7.ts)
+- Updated: [frontend/src/pages/AdminLogsPage.vue](/vol1/1000/docker/subscription_manager/frontend/src/pages/AdminLogsPage.vue)
+- Updated: [docs/TASK_STATE.md](/vol1/1000/docker/subscription_manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `npm run typecheck` in `backend`
+- `npm run typecheck` in `frontend`
+- `npm run build` in `backend`
+- `npm run build` in `frontend`
+- `docker compose up -d app`
+- `docker compose up -d --build web`
+- `curl -s -D /tmp/sub_headers.txt 'http://127.0.0.1:8084/sub/c0bQXhqar1?target=clash' -o /tmp/sub_body.txt`
+- `docker exec shared-mongo mongosh --quiet --eval 'db = db.getSiblingDB(\"subscription_manager\"); printjson(db.sub_access_logs.find().sort({created_at:-1}).limit(1).toArray()[0])'`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已重建并运行新镜像
+- `subscription-manager-web`: Up，已重建并运行新镜像
+- `subscription-manager-subconverter`: Up
+- `shared-mongo`: Up
+- `shared-redis`: Up
+- `gateway-caddy`: Up
+
+## API/Interface Status
+
+- `GET /sub/<有效token>?target=clash`: 200 OK
+- 最新订阅访问日志已写入 `response_time_ms`
+- 管理后台的订阅访问日志接口已返回新字段，前端表格可直接展示
+
+## Validation Result
+
+- Backend typecheck: pass
+- Frontend typecheck: pass
+- Backend build: pass
+- Frontend build: pass
+- 订阅请求实测: pass
+- 访问日志落库新字段: pass
+
+## Notes / Blockers
+
+- 前端镜像构建中曾遇到一次 `npm ci` 的 idle timeout，但随后重新构建已成功完成。
+- 旧日志没有 `response_time_ms` 时会显示 `-`，这是预期行为。
+
+## Next Step
+
+- 如果你愿意，我可以继续把“响应时间”做成更友好的展示，比如自动换算成 `ms / s` 两种格式，或者加筛选条件。
+
+## Date
+
+2026-06-12
+
+## Round Goal
+
 再次把整条订阅链路按不同场景跑一遍，验证正常返回、模板缺失、节点池缺失、失败态自愈这些路径是否都能按预期工作。
 
 ## Project Current Status

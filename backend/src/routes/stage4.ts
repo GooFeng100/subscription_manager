@@ -25,6 +25,7 @@ import { getUpstreamBatchState, setCacheStepState } from "../lib/upstream-batch-
 
 const router = Router();
 const CACHE_WAIT_POLL_MS = 250;
+const MAX_SUB_ACCESS_LOGS = 1000;
 
 const targetSchema = z.string().trim().min(1).max(32).optional();
 
@@ -294,6 +295,7 @@ async function writeAccessLog(params: {
   statusCode: number;
   success: boolean;
   message: string;
+  responseTimeMs?: number;
 }) {
   await subAccessLogsCol().insertOne({
     user_id: params.userId ? new ObjectId(params.userId) : null,
@@ -304,7 +306,55 @@ async function writeAccessLog(params: {
     status_code: params.statusCode,
     success: params.success,
     message: params.message,
+    response_time_ms: params.responseTimeMs ?? null,
     created_at: new Date()
+  });
+
+  const totalLogs = await subAccessLogsCol().estimatedDocumentCount();
+  const excess = totalLogs - MAX_SUB_ACCESS_LOGS;
+  if (excess <= 0) {
+    return;
+  }
+
+  const oldestLogs = await subAccessLogsCol()
+    .find({}, { projection: { _id: 1 } })
+    .sort({ created_at: 1, _id: 1 })
+    .limit(excess)
+    .toArray();
+
+  if (!oldestLogs.length) {
+    return;
+  }
+
+  await subAccessLogsCol().deleteMany({
+    _id: { $in: oldestLogs.map((doc) => doc._id) }
+  });
+}
+
+function logAccessAfterResponse(
+  response: import("express").Response,
+  params: Parameters<typeof writeAccessLog>[0],
+  startedAt: number
+) {
+  let wroteLog = false;
+  const persist = () => {
+    if (wroteLog) {
+      return;
+    }
+    wroteLog = true;
+    void writeAccessLog({
+      ...params,
+      responseTimeMs: Math.max(0, Date.now() - startedAt)
+    }).catch((error) => {
+      console.error("[sub-access-log] failed to write access log", error);
+    });
+  };
+
+  response.once("finish", persist);
+  response.once("close", () => {
+    if (!response.writableEnded) {
+      persist();
+    }
   });
 }
 
@@ -326,6 +376,7 @@ router.get("/api/internal/converter-source/:cacheKey", async (req, res) => {
 });
 
 router.get("/sub/:token", async (req, res) => {
+  const startedAt = Date.now();
   const token = req.params.token;
   const targetParsed = targetSchema.safeParse(req.query.target);
   const ip = clientIp(req.ip);
@@ -338,7 +389,7 @@ router.get("/sub/:token", async (req, res) => {
   const now = new Date();
   const user = await usersCol().findOne({ sub_token: token });
   if (!user) {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: null,
       username: null,
       token,
@@ -347,7 +398,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 404,
       success: false,
       message: "token not found"
-    });
+    }, startedAt);
     return res.status(404).type("text/plain; charset=utf-8").send("subscription token not found");
   }
 
@@ -403,7 +454,7 @@ router.get("/sub/:token", async (req, res) => {
   };
 
   if (syncedUser.status === "disabled") {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -412,7 +463,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 200,
       success: true,
       message: "account disabled, empty payload returned"
-    });
+    }, startedAt);
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
@@ -423,7 +474,7 @@ router.get("/sub/:token", async (req, res) => {
   }
 
   if (syncedUser.status === "inactive") {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -432,7 +483,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 200,
       success: true,
       message: "account inactive, empty payload returned"
-    });
+    }, startedAt);
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
@@ -443,7 +494,7 @@ router.get("/sub/:token", async (req, res) => {
   }
 
   if (isExpired(syncedUser.expire_at, now) && syncedUser.status === "expired") {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -452,7 +503,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 200,
       success: true,
       message: "subscription expired, empty payload returned"
-    });
+    }, startedAt);
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
     const response = responseHeaders(
       res.status(200),
@@ -468,7 +519,7 @@ router.get("/sub/:token", async (req, res) => {
     await redis.expire(rlKey, 60);
   }
   if (current > settings.sub_rate_limit_per_minute) {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -477,7 +528,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 429,
       success: false,
       message: "rate limit exceeded"
-    });
+    }, startedAt);
     return res.status(429).type("text/plain; charset=utf-8").send("too many subscription requests");
   }
 
@@ -496,7 +547,7 @@ router.get("/sub/:token", async (req, res) => {
 
   const nodePoolText = nodePoolSnapshot?.text || "";
   if (!nodePoolText) {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -505,7 +556,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 503,
       success: false,
       message: isTemplateTarget ? "subscription template recovery timed out" : "node pool cache recovery timed out"
-    });
+    }, startedAt);
     return res
       .status(503)
       .setHeader("Retry-After", "3")
@@ -520,7 +571,7 @@ router.get("/sub/:token", async (req, res) => {
       `📌 V${subVersion.version}｜到期 ${expireDate}`
     );
     if (!payload) {
-      await writeAccessLog({
+      logAccessAfterResponse(res, {
         userId: String(syncedUser._id),
         username: syncedUser.username,
         token,
@@ -529,12 +580,12 @@ router.get("/sub/:token", async (req, res) => {
         statusCode: 502,
         success: false,
         message: "shadowrocket payload empty"
-      });
+      }, startedAt);
       return res.status(200).type("text/plain; charset=utf-8").send("");
     }
 
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -543,7 +594,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 200,
       success: true,
       message: `ok nodes=${countNodeProtocols(nodePoolText)} shadowrocket=direct`
-    });
+    }, startedAt);
     return responseHeaders(
       res.status(200),
       buildSubscriptionFilename(
@@ -567,7 +618,7 @@ router.get("/sub/:token", async (req, res) => {
     );
     const payload = encodeBase64SubscriptionContent(rawPayload);
     if (!payload) {
-      await writeAccessLog({
+      logAccessAfterResponse(res, {
         userId: String(syncedUser._id),
         username: syncedUser.username,
         token,
@@ -576,12 +627,12 @@ router.get("/sub/:token", async (req, res) => {
         statusCode: 200,
         success: true,
         message: "raw node payload empty"
-      });
+      }, startedAt);
       return res.status(200).type("text/plain; charset=utf-8").send("");
     }
 
     const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -590,7 +641,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 200,
       success: true,
       message: `ok nodes=${countNodeProtocols(nodePoolText)} ss=raw`
-    });
+    }, startedAt);
     return responseHeaders(
       res.status(200),
       responseFilename(),
@@ -615,7 +666,7 @@ router.get("/sub/:token", async (req, res) => {
     template = await waitForSubscriptionTemplate(subVersion.version, target, templateWaitMs);
   }
   if (!template) {
-    await writeAccessLog({
+    logAccessAfterResponse(res, {
       userId: String(syncedUser._id),
       username: syncedUser.username,
       token,
@@ -624,7 +675,7 @@ router.get("/sub/:token", async (req, res) => {
       statusCode: 503,
       success: false,
       message: "subscription template recovery timed out"
-    });
+    }, startedAt);
     return res
       .status(503)
       .setHeader("Retry-After", "3")
@@ -639,7 +690,7 @@ router.get("/sub/:token", async (req, res) => {
       buildSubscriptionInfoName({ version: String(subVersion.version), expireDate })
     )
     : template;
-  await writeAccessLog({
+  logAccessAfterResponse(res, {
     userId: String(syncedUser._id),
     username: syncedUser.username,
     token,
@@ -648,7 +699,7 @@ router.get("/sub/:token", async (req, res) => {
     statusCode: 200,
     success: true,
     message: `ok nodes=${countNodeProtocols(nodePoolText)} template=redis`
-  });
+  }, startedAt);
   const userInfoHeader = buildSubscriptionUserInfo(syncedUser);
   const response = res
     .status(200)
