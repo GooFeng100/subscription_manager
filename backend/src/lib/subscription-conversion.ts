@@ -1,9 +1,10 @@
 import crypto from "node:crypto";
+import { load as loadYaml } from "js-yaml";
 
 export type SubscriptionContentType = "raw_nodes" | "base64_nodes" | "clash_yaml" | "invalid_or_html";
 export type UpstreamSourceType = "auto" | "ss" | "trojan" | "vmess" | "vless" | "hysteria2" | "tuic" | "clash_yaml" | "base64";
 
-const NODE_PROTOCOL_RE = /\b(?:trojan|vmess|vless|ss|ssr|hysteria2|tuic):\/\//gi;
+const NODE_PROTOCOL_RE = /\b(?:trojan|vmess|vless|ss|ssr|hysteria2|tuic|anytls):\/\//gi;
 const HTML_HINT_RE = /<(?:!doctype|html|head|body|title|meta|script|style|iframe|div|span)[\s>]/i;
 
 function normalizeText(value: string) {
@@ -46,6 +47,136 @@ function decodeBase64Loose(value: string) {
   return "";
 }
 
+type ClashProxy = Record<string, unknown>;
+
+function stringValue(value: unknown) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function hostValue(value: unknown) {
+  const host = stringValue(value).trim();
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+function encoded(value: unknown) {
+  return encodeURIComponent(stringValue(value));
+}
+
+function appendQuery(params: URLSearchParams, key: string, value: unknown) {
+  const normalized = stringValue(value).trim();
+  if (normalized) params.set(key, normalized);
+}
+
+function clashProxyToUri(proxy: ClashProxy) {
+  const type = stringValue(proxy.type).toLowerCase();
+  const server = hostValue(proxy.server);
+  const port = Number(proxy.port);
+  const name = encoded(proxy.name || `${type}-${server}`);
+  if (!server || !Number.isInteger(port) || port <= 0 || port > 65535) return null;
+
+  if (type === "ss") {
+    const cipher = stringValue(proxy.cipher);
+    const password = stringValue(proxy.password);
+    if (!cipher || !password) return null;
+    const credentials = Buffer.from(`${cipher}:${password}`, "utf8").toString("base64url");
+    const query = new URLSearchParams();
+    appendQuery(query, "plugin", proxy.plugin);
+    appendQuery(query, "plugin-opts", proxy["plugin-opts"]);
+    return `ss://${credentials}@${server}:${port}${query.size ? `?${query}` : ""}#${name}`;
+  }
+
+  if (type === "vmess") {
+    const uuid = stringValue(proxy.uuid);
+    if (!uuid) return null;
+    const network = stringValue(proxy.network || "tcp");
+    const wsOpts = (proxy["ws-opts"] || {}) as ClashProxy;
+    const headers = (wsOpts.headers || {}) as ClashProxy;
+    const h2Opts = (proxy["h2-opts"] || {}) as ClashProxy;
+    const grpcOpts = (proxy["grpc-opts"] || {}) as ClashProxy;
+    const payload = {
+      v: "2",
+      ps: stringValue(proxy.name),
+      add: stringValue(proxy.server),
+      port: String(port),
+      id: uuid,
+      aid: stringValue(proxy.alterId || 0),
+      scy: stringValue(proxy.cipher || "auto"),
+      net: network,
+      type: "none",
+      host: stringValue(headers.Host || headers.host || h2Opts.host),
+      path: stringValue(wsOpts.path || h2Opts.path || grpcOpts["grpc-service-name"]),
+      tls: proxy.tls ? "tls" : "",
+      sni: stringValue(proxy.servername || proxy.sni),
+      alpn: Array.isArray(proxy.alpn) ? proxy.alpn.join(",") : stringValue(proxy.alpn),
+      fp: stringValue(proxy["client-fingerprint"])
+    };
+    return `vmess://${Buffer.from(JSON.stringify(payload), "utf8").toString("base64")}`;
+  }
+
+  const password = type === "trojan" ? proxy.password : type === "vless" ? proxy.uuid : null;
+  if ((type === "trojan" || type === "vless") && password) {
+    const query = new URLSearchParams();
+    if (type === "vless") appendQuery(query, "encryption", "none");
+    appendQuery(query, "security", proxy.tls ? "tls" : proxy.security);
+    appendQuery(query, "sni", proxy.servername || proxy.sni);
+    appendQuery(query, "type", proxy.network);
+    const wsOpts = (proxy["ws-opts"] || {}) as ClashProxy;
+    const headers = (wsOpts.headers || {}) as ClashProxy;
+    appendQuery(query, "host", headers.Host || headers.host);
+    appendQuery(query, "path", wsOpts.path);
+    appendQuery(query, "flow", proxy.flow);
+    if (proxy["skip-cert-verify"] !== undefined) query.set("allowInsecure", proxy["skip-cert-verify"] ? "1" : "0");
+    return `${type}://${encoded(password)}@${server}:${port}${query.size ? `?${query}` : ""}#${name}`;
+  }
+
+  if (type === "hysteria2" || type === "hy2") {
+    const password = proxy.password || proxy.auth;
+    if (!password) return null;
+    const query = new URLSearchParams();
+    appendQuery(query, "sni", proxy.sni || proxy.servername);
+    appendQuery(query, "obfs", proxy.obfs);
+    appendQuery(query, "obfs-password", proxy["obfs-password"]);
+    if (proxy["skip-cert-verify"] !== undefined) query.set("insecure", proxy["skip-cert-verify"] ? "1" : "0");
+    return `hysteria2://${encoded(password)}@${server}:${port}${query.size ? `?${query}` : ""}#${name}`;
+  }
+
+  if (type === "anytls") {
+    if (!proxy.password) return null;
+    const query = new URLSearchParams();
+    appendQuery(query, "security", "tls");
+    appendQuery(query, "sni", proxy.sni || proxy.servername);
+    if (proxy["skip-cert-verify"] !== undefined) query.set("insecure", proxy["skip-cert-verify"] ? "1" : "0");
+    return `anytls://${encoded(proxy.password)}@${server}:${port}${query.size ? `?${query}` : ""}#${name}`;
+  }
+
+  if (type === "tuic") {
+    if (!proxy.uuid || !proxy.password) return null;
+    const query = new URLSearchParams();
+    appendQuery(query, "congestion_control", proxy["congestion-controller"]);
+    appendQuery(query, "udp_relay_mode", proxy["udp-relay-mode"]);
+    appendQuery(query, "sni", proxy.sni || proxy.servername);
+    if (Array.isArray(proxy.alpn)) query.set("alpn", proxy.alpn.join(","));
+    if (proxy["skip-cert-verify"] !== undefined) query.set("allow_insecure", proxy["skip-cert-verify"] ? "1" : "0");
+    return `tuic://${encoded(proxy.uuid)}:${encoded(proxy.password)}@${server}:${port}${query.size ? `?${query}` : ""}#${name}`;
+  }
+
+  return null;
+}
+
+export function convertClashYamlToNodeText(text: string) {
+  try {
+    const document = loadYaml(text) as { proxies?: unknown } | null;
+    const proxies = Array.isArray(document?.proxies) ? document.proxies : [];
+    const nodes = proxies
+      .filter((proxy): proxy is ClashProxy => !!proxy && typeof proxy === "object" && !Array.isArray(proxy))
+      .map((proxy) => clashProxyToUri(proxy))
+      .filter((node): node is string => !!node);
+    return { text: nodes.join("\n"), nodeCount: nodes.length, totalProxyCount: proxies.length };
+  } catch {
+    return { text: "", nodeCount: 0, totalProxyCount: 0 };
+  }
+}
+
 export function classifySubscriptionText(rawText: string): {
   type: SubscriptionContentType;
   normalizedText: string;
@@ -59,11 +190,15 @@ export function classifySubscriptionText(rawText: string): {
   }
 
   if (isLikelyClashYaml(normalizedText)) {
+    const converted = convertClashYamlToNodeText(normalizedText);
     return {
       type: "clash_yaml",
       normalizedText,
-      nodeCount: 0,
-      message: "识别为 Clash YAML"
+      decodedText: converted.text,
+      nodeCount: converted.nodeCount,
+      message: converted.nodeCount > 0
+        ? `识别为 Clash YAML，已转换 ${converted.nodeCount}/${converted.totalProxyCount} 个节点`
+        : "识别为 Clash YAML，但未找到可转换节点"
     };
   }
 
@@ -97,12 +232,15 @@ export function classifySubscriptionText(rawText: string): {
   }
 
   if (decodedText && isLikelyClashYaml(decodedText)) {
+    const converted = convertClashYamlToNodeText(decodedText);
     return {
       type: "clash_yaml",
       normalizedText,
-      decodedText,
-      nodeCount: 0,
-      message: "识别为 Clash YAML"
+      decodedText: converted.text,
+      nodeCount: converted.nodeCount,
+      message: converted.nodeCount > 0
+        ? `识别为 Base64 Clash YAML，已转换 ${converted.nodeCount}/${converted.totalProxyCount} 个节点`
+        : "识别为 Base64 Clash YAML，但未找到可转换节点"
     };
   }
 

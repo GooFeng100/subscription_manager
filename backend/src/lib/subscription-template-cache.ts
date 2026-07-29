@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { dump as dumpYaml } from "js-yaml";
 import { getRuntimeSettings } from "./runtime-settings.js";
 import { redis } from "./redis.js";
 import { createShortCacheKey } from "./subscription-conversion.js";
@@ -54,6 +55,47 @@ function applyEmojiPreservingParams(url: URL) {
   url.searchParams.set("add_emoji", "true");
   url.searchParams.set("remove_emoji", "false");
   url.searchParams.set("remove_old_emoji", "false");
+}
+
+function buildNativeAnyTlsClashTemplate(nodePoolText: string) {
+  const lines = nodePoolText.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length || lines.some((line) => !line.toLowerCase().startsWith("anytls://"))) return null;
+
+  const proxies = lines.map((line) => {
+    try {
+      const url = new URL(line);
+      const port = Number(url.port);
+      if (!url.hostname || !Number.isInteger(port) || !url.username) return null;
+      const name = decodeURIComponent(url.hash.replace(/^#/u, "")) || `AnyTLS-${url.hostname}`;
+      return {
+        name,
+        type: "anytls",
+        server: url.hostname.replace(/^\[|\]$/g, ""),
+        port,
+        password: decodeURIComponent(url.username),
+        sni: url.searchParams.get("sni") || undefined,
+        "skip-cert-verify": url.searchParams.get("insecure") === "1",
+        udp: true
+      };
+    } catch {
+      return null;
+    }
+  }).filter((proxy): proxy is NonNullable<typeof proxy> => !!proxy);
+
+  if (proxies.length !== lines.length) return null;
+  const names = proxies.map((proxy) => proxy.name);
+  return dumpYaml({
+    "mixed-port": 7890,
+    "allow-lan": true,
+    mode: "rule",
+    "log-level": "info",
+    proxies,
+    "proxy-groups": [
+      { name: "🚀 出站节点", type: "select", proxies: names },
+      { name: "♻️ 自动选择", type: "url-test", proxies: names, url: "http://www.gstatic.com/generate_204", interval: 300 }
+    ],
+    rules: ["MATCH,🚀 出站节点"]
+  }, { noRefs: true, lineWidth: -1 });
 }
 
 function sleep(ms: number) {
@@ -120,6 +162,18 @@ async function convertTemplate(version: string, target: string, nodePoolText: st
     });
     const text = await resp.text();
     if (!resp.ok) {
+      const nativeAnyTlsTemplate = normalizeTemplateTarget(target) === "clash"
+        ? buildNativeAnyTlsClashTemplate(nodePoolText)
+        : null;
+      if (nativeAnyTlsTemplate) {
+        await redis.set(templateKey(version, target), nativeAnyTlsTemplate);
+        logTemplateEvent("warn", "converter does not support AnyTLS; native Clash template cached", {
+          version,
+          target: normalizeTemplateTarget(target),
+          bytes: nativeAnyTlsTemplate.length
+        });
+        return nativeAnyTlsTemplate;
+      }
       logTemplateEvent("error", "converter request failed", {
         version,
         target: normalizeTemplateTarget(target),

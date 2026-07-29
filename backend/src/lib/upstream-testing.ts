@@ -99,12 +99,12 @@ function buildTestResult(attempt: FetchAttemptResult, usedProxy = false): Upstre
     attempt.status !== null &&
     attempt.status >= 200 &&
     attempt.status < 300 &&
-    classification !== null &&
+    classification !== null && classification.nodeCount > 0 &&
     (classification.type === "raw_nodes" || classification.type === "base64_nodes" || classification.type === "clash_yaml");
   const nodeText =
     classification?.type === "raw_nodes"
       ? sanitizeNodePoolText(classification.normalizedText)
-      : classification?.type === "base64_nodes"
+      : classification?.type === "base64_nodes" || classification?.type === "clash_yaml"
         ? sanitizeNodePoolText(classification.decodedText || "")
         : null;
 
@@ -122,26 +122,36 @@ function buildTestResult(attempt: FetchAttemptResult, usedProxy = false): Upstre
 }
 
 export async function testUpstreamSource(source: UpstreamSourceLike): Promise<UpstreamTestResult> {
-  const userAgent = resolveUpstreamFetchUserAgent(source.source_type || "auto");
+  const primaryUserAgent = resolveUpstreamFetchUserAgent(source.source_type || "auto");
+  const userAgents = source.source_type === "auto"
+    ? [...new Set([primaryUserAgent, "Clash", "Clash.Meta"])]
+    : [primaryUserAgent];
   const directAttempts = source.fetch_via_proxy ? 3 : 1;
   const proxyUrl = normalizeProxyUrl(source.upstream_fetch_proxy_url);
   let lastFailure: UpstreamTestResult | null = null;
 
   source.onPhase?.("direct");
-  for (let i = 0; i < directAttempts; i += 1) {
-    const directAttempt = await fetchSubscriptionText(source.source_url, userAgent);
-    const directResult = buildTestResult(directAttempt);
-    if (directResult.ok) {
-      return directResult;
+  for (const userAgent of userAgents) {
+    for (let i = 0; i < directAttempts; i += 1) {
+      const directAttempt = await fetchSubscriptionText(source.source_url, userAgent);
+      const directResult = buildTestResult(directAttempt);
+      if (directResult.ok) {
+        return directResult;
+      }
+      lastFailure = directResult;
     }
-    lastFailure = directResult;
   }
 
   if (source.fetch_via_proxy) {
     if (proxyUrl) {
       source.onPhase?.("proxy");
-      const proxyAttempt = await fetchSubscriptionText(source.source_url, userAgent, proxyUrl);
-      return buildTestResult(proxyAttempt, true);
+      for (const userAgent of userAgents) {
+        const proxyAttempt = await fetchSubscriptionText(source.source_url, userAgent, proxyUrl);
+        const proxyResult = buildTestResult(proxyAttempt, true);
+        if (proxyResult.ok) return proxyResult;
+        lastFailure = proxyResult;
+      }
+      return lastFailure!;
     }
     return {
       ok: false,

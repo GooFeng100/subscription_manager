@@ -19,6 +19,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "ioredis": "^5.6.1",
+    "js-yaml": "^5.2.2",
     "mongodb": "^6.18.0",
     "undici": "^6.26.0",
     "zod": "^3.25.76"
@@ -27,6 +28,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^4.17.23",
     "@types/express-session": "^1.18.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.19.1",
     "@typescript-eslint/eslint-plugin": "^8.34.0",
     "@typescript-eslint/parser": "^8.34.0",
