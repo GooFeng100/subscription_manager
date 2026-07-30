@@ -1,5 +1,5 @@
 export const SUBSCRIPTION_INFO_GROUP_PREFIX = "📌 订阅信息｜";
-export const NODE_LINE_RE = /^(?:ss|trojan|vmess|vless|ssr|hysteria2|tuic):\/\//i;
+export const NODE_LINE_RE = /^(?:ss|trojan|vmess|vless|ssr|hysteria2|tuic|anytls):\/\//i;
 
 export function buildSubscriptionInfoName(params: { version: string; expireDate: string; suffix?: string }) {
   const base = `${SUBSCRIPTION_INFO_GROUP_PREFIX}V${params.version}｜到期 ${params.expireDate}`;

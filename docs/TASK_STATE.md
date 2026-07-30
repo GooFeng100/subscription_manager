@@ -2,6 +2,76 @@
 
 ## Date
 
+2026-07-30
+
+## Round Goal
+
+修复 AnyTLS 节点池下用户 `target=ss` 订阅返回 200 空正文、访问日志显示 `raw node payload empty` 的问题。
+
+## Project Current Status
+
+- 根因已确认：节点池与 Clash 模板都已有 92 条 AnyTLS 节点，但用户订阅输出使用的 `NODE_LINE_RE` 未包含 `anytls://`，导致 `ss`/Shadowrocket 直出链路过滤掉全部节点。
+- 已把 AnyTLS 加入用户订阅节点协议白名单。
+- 后端镜像已重建并部署，真实有效用户的 `target=ss` 请求返回 HTTP 200。
+- 响应 Base64 解码后包含 92 条节点，协议统计为 `anytls: 92`，不再返回空正文。
+- 已复核原有首节点命名规则：只给第一条真实节点增加 `📌 V版本｜到期日期｜原节点名` 前缀，第二条及后续节点名称保持不变。
+- 已复核最终传给用户的是整份节点列表的 Base64 编码文本，而不是明文 URI。
+- 用户确认上游首节点原名本身为 `到期: 2026-08-29`，因此最终名称同时包含“用户授权到期日”和“上游原节点名中的到期日”属于预期行为；未过滤或改写该原名。
+- 一次上游临时 HTTP 400 导致 `26.7.6` 空快照，已使用此前验证通过的 92 节点响应剥离旧展示前缀后恢复 MongoDB、Redis 和 Clash 模板。
+- 恢复后首节点只有一层系统展示前缀，未发生重复装饰。
+
+## File Changes In This Round
+
+- Updated: [backend/src/lib/subscription-display.ts](/srv/projects/subscription-manager/backend/src/lib/subscription-display.ts)
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `rg` / `sed` 检查 `NODE_LINE_RE`、`buildRawNodeSubscriptionContent` 和 `raw node payload empty` 链路
+- `git diff --check`
+- `docker compose build app`
+- `docker compose up -d --force-recreate app`
+- 使用有效用户 token 请求 `GET /sub/<token>?target=ss`，仅统计脱敏后的 HTTP 状态、Base64 字节数、节点数和协议
+- 对线上 `ss` 响应执行 Base64 round-trip，并脱敏检查首节点名称前缀与第二节点名称未被修改
+- 恢复 `26.7.6` 的 92 节点 MongoDB/Redis 快照并重新生成 AnyTLS Clash 模板
+- 再次验证首节点系统前缀计数为 1、第二节点无系统前缀、整体 Base64 round-trip 通过
+- `curl http://127.0.0.1:8084/health`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，已运行本轮新镜像
+- `subscription-manager-web`: Up
+- `subscription-manager-subconverter`: Up
+
+## API/Interface Status
+
+- 修改前 `target=clash`：200，92 节点。
+- 修改前 `target=ss`：200，空正文，日志为 `raw node payload empty`。
+- 修改后 `target=ss`：200，Base64 正文 20448 字节，解码后 92 条 AnyTLS 节点。
+- Base64 round-trip：通过；首节点已按 `📌 V版本｜到期日期｜原节点名` 改名，第二节点未增加该前缀。
+- 当前首节点：`📌 V26.7.6｜到期 2026-12-31｜到期: 2026-08-29`；后一个到期日属于上游原节点名。
+- 当前版本 `26.7.6`：MongoDB/Redis 节点池 92 条，Clash 模板已恢复 ready。
+- `GET /health`：200。
+
+## Validation Result
+
+- Backend TypeScript build: pass
+- `git diff --check`: pass
+- App 重建与启动: pass
+- 真实用户 `ss` 订阅：pass，92/92 AnyTLS 节点
+- `ss` 整体 Base64 编码、仅首节点改名规则：pass
+- 恢复后系统展示前缀数量：1，pass
+
+## Notes / Blockers
+
+- 无代码阻塞。
+
+## Next Step
+
+- 使用实际支持 AnyTLS 的客户端重新刷新 `ss` 目标订阅并进行节点连通性验收。
+
+## Date
+
 2026-07-29
 
 ## Round Goal
