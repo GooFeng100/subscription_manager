@@ -52,6 +52,48 @@ export async function api<T = any>(path: string, init?: RequestInit): Promise<T>
   return data as T;
 }
 
+export type NodePoolFilterNode = {
+  id: string;
+  name: string;
+  protocol: string;
+  selected: boolean;
+};
+
+export type NodePoolFilterGroup = {
+  upstream: {
+    id: string;
+    name: string;
+  };
+  nodes: NodePoolFilterNode[];
+};
+
+export type NodePoolNodesResponse = {
+  groups: NodePoolFilterGroup[];
+  counts: {
+    mongoTotal: number;
+    mongoSelected: number;
+    redisActive: number;
+  };
+};
+
+export type ApplyNodePoolFilterResponse = {
+  mongoTotal: number;
+  selectedCount: number;
+  redisActive: number;
+  version: string;
+};
+
+export function getNodePoolNodes() {
+  return api<NodePoolNodesResponse>("/api/admin/node-pool-nodes");
+}
+
+export function applyNodePoolFilter(nodeIds: string[]) {
+  return api<ApplyNodePoolFilterResponse>("/api/admin/node-pool/filter", {
+    method: "POST",
+    body: JSON.stringify({ nodeIds })
+  });
+}
+
 export function redirectOnUnauthorizedStatus(status: number) {
   if (status === 401) {
     clearBootMeCache();

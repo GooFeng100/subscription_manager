@@ -2,7 +2,8 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { z } from "zod";
 import { requireAdmin } from "../middleware/require-role.js";
-import { upstreamsCol } from "../lib/db.js";
+import { nodePoolEntriesCol, upstreamsCol } from "../lib/db.js";
+import { getNodePoolMeta } from "../lib/node-pool.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
 import { maskUrlForLog } from "../lib/subscription-conversion.js";
 import { testUpstreamSource } from "../lib/upstream-testing.js";
@@ -79,8 +80,12 @@ function upstreamView(doc: {
 }
 
 router.get("/admin/upstreams", requireAdmin, async (_req, res) => {
-  const docs = await upstreamsCol().find({}).sort({ created_at: -1 }).toArray();
-  const batchState = await getUpstreamBatchState();
+  const [docs, batchState, mongoEntryCount, redisMeta] = await Promise.all([
+    upstreamsCol().find({}).sort({ created_at: -1 }).toArray(),
+    getUpstreamBatchState(),
+    nodePoolEntriesCol().countDocuments({}),
+    getNodePoolMeta()
+  ]);
   return res.json({
     items: docs.map((d) => upstreamView(d)),
     batch_test_running: batchState.running,
@@ -94,8 +99,10 @@ router.get("/admin/upstreams", requireAdmin, async (_req, res) => {
     cache_state: {
       phase: batchState.phase,
       version: batchState.version,
-      mongo_node_pool: batchState.mongoNodePool,
-      redis_node_pool: batchState.redisNodePool,
+      // Admin totals describe the full candidate pool and the active Redis pool.
+      // Keep publication progress/state unchanged in storage.
+      mongo_node_pool: { ...batchState.mongoNodePool, nodeCount: mongoEntryCount },
+      redis_node_pool: { ...batchState.redisNodePool, nodeCount: redisMeta?.nodeCount || 0 },
       template: batchState.template
     }
   });

@@ -13,6 +13,7 @@
         <RouterLink to="/admin/users">👥 用户管理</RouterLink>
         <RouterLink to="/admin/codes">🗝️ 订阅代码</RouterLink>
         <RouterLink to="/admin/upstreams">🛰️ 上游配置</RouterLink>
+        <RouterLink to="/admin/node-filter">🔎 节点筛选</RouterLink>
         <RouterLink to="/admin/rotation">🔁 轮询设置</RouterLink>
         <RouterLink to="/admin/settings">⚙️ 系统设置</RouterLink>
         <RouterLink to="/admin/logs">🕘 系统日志</RouterLink>

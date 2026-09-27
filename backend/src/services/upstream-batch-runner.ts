@@ -1,21 +1,15 @@
 import { ObjectId } from "mongodb";
 import { env } from "../config/env.js";
-import { adminsCol, rotationLogsCol, upstreamsCol, usersCol } from "../lib/db.js";
+import { adminsCol, nodePoolEntriesCol, rotationLogsCol, upstreamsCol, usersCol, type NodePoolEntryDoc } from "../lib/db.js";
+import { buildNodePoolEntries } from "../lib/node-pool-entry.js";
+import { acquireNodePoolOperationLock, releaseNodePoolOperationLock } from "../lib/node-pool-operation-lock.js";
 import { getRuntimeSettings } from "../lib/runtime-settings.js";
-import { redis } from "../lib/redis.js";
 import { countNodeProtocols, maskUrlForLog } from "../lib/subscription-conversion.js";
 import { getUpstreamBatchState, setCacheStepState, setUpstreamBatchState } from "../lib/upstream-batch-state.js";
-import { clearNodePool, hydrateNodePoolFromMongo, saveNodePoolSnapshot } from "../lib/node-pool.js";
-import {
-  clearSubscriptionTemplateCache,
-  DEFAULT_TEMPLATE_TARGET_COUNT,
-  warmDefaultSubscriptionTemplates
-} from "../lib/subscription-template-cache.js";
+import { DEFAULT_TEMPLATE_TARGET_COUNT } from "../lib/subscription-template-cache.js";
 import { testUpstreamSource } from "../lib/upstream-testing.js";
-import { bumpCurrentSubVersion, getCurrentSubVersion } from "./subscription-version.js";
-
-const BATCH_LOCK_KEY = "sm:sub:upstream-batch-lock";
-const BATCH_LOCK_TTL_SECONDS = 60 * 30;
+import { publishNodePool } from "./node-pool-publisher.js";
+import { getCurrentSubVersion } from "./subscription-version.js";
 
 function logBatchEvent(level: "log" | "warn" | "error", message: string, meta: Record<string, unknown> = {}) {
   const payload = { scope: "upstream-batch", ...meta };
@@ -100,19 +94,6 @@ type RunOptions = {
   onEvent?: (event: UpstreamBatchRunEvent) => void;
 };
 
-async function acquireBatchLock() {
-  const token = `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const ok = await redis.call("set", BATCH_LOCK_KEY, token, "NX", "EX", String(BATCH_LOCK_TTL_SECONDS));
-  return ok ? token : null;
-}
-
-async function releaseBatchLock(token: string) {
-  const current = await redis.get(BATCH_LOCK_KEY);
-  if (current === token) {
-    await redis.del(BATCH_LOCK_KEY);
-  }
-}
-
 async function resolveOperatorForAuto() {
   const admin = await adminsCol().findOne({ username: env.ADMIN_USERNAME });
   if (admin?._id) {
@@ -126,7 +107,7 @@ async function resolveOperatorForAuto() {
 }
 
 export async function runUpstreamBatchRefresh(options: RunOptions): Promise<UpstreamBatchRunSummary> {
-  const lockToken = await acquireBatchLock();
+  const lockToken = await acquireNodePoolOperationLock("batch");
   if (!lockToken) {
     return {
       locked: true,
@@ -165,6 +146,7 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
       };
     }
 
+    await nodePoolEntriesCol().deleteMany({});
     const docs = await upstreamsCol().find({ enabled: true }).sort({ updated_at: -1 }).toArray();
     docsCount = docs.length;
     startedAt = new Date().toISOString();
@@ -216,8 +198,9 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
     });
 
     let nextNodePoolText = "";
+    const nextNodePoolEntries: NodePoolEntryDoc[] = [];
 
-    for (const doc of docs) {
+    for (const [upstreamOrder, doc] of docs.entries()) {
       const now = new Date();
       const result = await testUpstreamSource({
         name: doc.name,
@@ -244,6 +227,13 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
         if (result.nodeText) {
           nodeCount += result.nodeCount || countNodeProtocols(result.nodeText);
           nextNodePoolText = nextNodePoolText ? `${nextNodePoolText}\n${result.nodeText}` : result.nodeText;
+          nextNodePoolEntries.push(...buildNodePoolEntries({
+            upstreamId: doc._id!,
+            upstreamName: doc.name,
+            upstreamOrder,
+            nodeText: result.nodeText,
+            createdAt: now
+          }));
         }
       } else {
         failedCount += 1;
@@ -291,66 +281,18 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
       });
     }
 
-    const toVersion = await bumpCurrentSubVersion(new Date());
-    await setUpstreamBatchState({
-      phase: "writing_mongo",
-      version: toVersion.version,
-      total: docsCount,
-      success: successCount,
-      failed: failedCount,
-      nodeCount,
-      message: "writing node pool to mongo"
-    });
-    const snapshot = await saveNodePoolSnapshot(toVersion.version, nextNodePoolText);
-    await setCacheStepState("mongoNodePool", {
-      status: "ready",
-      ready: true,
-      total: docsCount,
-      success: successCount,
-      nodeCount: snapshot.nodeCount,
-      version: toVersion.version,
-      message: `mongo node pool ready (${successCount}/${docsCount})`
-    });
-
-    await setUpstreamBatchState({
-      phase: "hydrating_redis",
-      ready: false,
-      version: toVersion.version,
-      message: "hydrating redis node pool"
-    });
-    await setCacheStepState("redisNodePool", {
-      status: "running",
-      ready: false,
-      total: docsCount,
-      success: 0,
-      nodeCount: snapshot.nodeCount,
-      version: toVersion.version,
-      message: "redis node pool hydrating"
-    });
-    await clearNodePool();
-    await clearSubscriptionTemplateCache(fromVersion.version);
-    await clearSubscriptionTemplateCache(toVersion.version);
-    const hydrated = await hydrateNodePoolFromMongo(toVersion.version);
-    if (!hydrated) {
-      throw new Error("redis node pool hydration failed");
+    if (nextNodePoolEntries.length) {
+      await nodePoolEntriesCol().insertMany(nextNodePoolEntries);
     }
-    await setCacheStepState("redisNodePool", {
-      status: "ready",
-      ready: true,
-      total: docsCount,
-      success: successCount,
-      nodeCount: hydrated.nodeCount,
-      version: toVersion.version,
-      message: `redis node pool ready (${successCount}/${docsCount})`
+    const published = await publishNodePool(nextNodePoolText, {
+      fromVersion,
+      progress: {
+        total: docsCount,
+        success: successCount,
+        failed: failedCount
+      }
     });
-
-    await setUpstreamBatchState({
-      phase: "warming_templates",
-      ready: false,
-      version: toVersion.version,
-      message: "warming subscription templates"
-    });
-    await warmDefaultSubscriptionTemplates(toVersion.version, hydrated);
+    const toVersion = published.toVersion;
 
     const operator = options.operatorUserId && options.operatorUsername
       ? { operatorUserId: options.operatorUserId, operatorUsername: options.operatorUsername }
@@ -477,6 +419,6 @@ export async function runUpstreamBatchRefresh(options: RunOptions): Promise<Upst
       message
     };
   } finally {
-    await releaseBatchLock(lockToken);
+    await releaseNodePoolOperationLock(lockToken);
   }
 }

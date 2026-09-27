@@ -9,6 +9,7 @@ import stage3Router from "./routes/stage3.js";
 import stage4Router from "./routes/stage4.js";
 import stage6Router from "./routes/stage6.js";
 import stage7Router from "./routes/stage7.js";
+import nodePoolFilterRouter from "./routes/node-pool-filter.js";
 import { ensureDefaultAdmin } from "./services/admin-seed.js";
 import { boolFromEnv } from "./lib/utils.js";
 import { getRuntimeSettings } from "./lib/runtime-settings.js";
@@ -86,6 +87,7 @@ async function bootstrap() {
   app.use("/api", stage3Router);
   app.use("/api", stage6Router);
   app.use("/api", stage7Router);
+  app.use("/api", nodePoolFilterRouter);
   app.use("/", stage4Router);
 
   app.listen(env.PORT, "0.0.0.0", () => {

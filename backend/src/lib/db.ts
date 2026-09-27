@@ -104,6 +104,19 @@ export type UpstreamDoc = {
   updated_at: Date;
 };
 
+export type NodePoolEntryDoc = {
+  _id?: ObjectId;
+  upstream_id: ObjectId;
+  upstream_name: string;
+  node_name: string;
+  protocol: string;
+  uri: string;
+  selected: boolean;
+  upstream_order: number;
+  node_order: number;
+  created_at: Date;
+};
+
 export type SubAccessLogDoc = {
   _id?: ObjectId;
   user_id: ObjectId | null;
@@ -178,6 +191,10 @@ export function upstreamsCol() {
   return getDb().collection<UpstreamDoc>("upstreams");
 }
 
+export function nodePoolEntriesCol() {
+  return getDb().collection<NodePoolEntryDoc>("node_pool_entries");
+}
+
 export function subAccessLogsCol() {
   return getDb().collection<SubAccessLogDoc>("sub_access_logs");
 }
@@ -215,6 +232,9 @@ export async function ensureIndexes() {
   await renewalLogsCol().createIndex({ created_at: -1 });
   await upstreamsCol().createIndex({ name: 1 }, { unique: true });
   await upstreamsCol().createIndex({ enabled: 1, updated_at: -1 });
+  await nodePoolEntriesCol().createIndex({ upstream_order: 1, node_order: 1 });
+  await nodePoolEntriesCol().createIndex({ upstream_id: 1, node_order: 1 });
+  await nodePoolEntriesCol().createIndex({ selected: 1, upstream_order: 1, node_order: 1 });
   await subAccessLogsCol().createIndex({ token: 1, created_at: -1 });
   await subAccessLogsCol().createIndex({ user_id: 1, created_at: -1 });
   await subAccessLogsCol().createIndex({ created_at: -1 });

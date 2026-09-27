@@ -27,6 +27,7 @@
         <option value="disabled">禁用</option>
       </select>
       <button type="button" class="test-btn" :disabled="batching" @click="runAllTests">{{ batching ? '测试中...' : '全部测试' }}</button>
+      <button type="button" class="node-filter-btn" @click="openNodeFilter">节点筛选</button>
       <button type="button" class="add-btn" @click="openAdd">新增上游</button>
     </div>
 
@@ -163,10 +164,12 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import AdminLayout from '../components/admin/AdminLayout.vue';
 import { API_BASE, api, redirectOnUnauthorizedStatus } from '../lib/api';
 
 const UPSTREAMS_POLL_INTERVAL_MS = 5000;
+const router = useRouter();
 
 type Item = {
   id: string;
@@ -314,6 +317,10 @@ function openAdd() {
   target.value = null;
   editForm.value = { name: '', url: '', note: '', sourceType: 'auto', fetchViaProxy: false };
   editOpen.value = true;
+}
+
+function openNodeFilter() {
+  void router.push('/admin/node-filter');
 }
 
 function openEdit(u: Item) {
@@ -691,11 +698,13 @@ h1 { margin: 0; color: #0f172a; }
 .notice.info { color: #1d4ed8; }
 .notice.success { color: #15803d; }
 .notice.error { color: #b91c1c; }
-.filters { display: grid; grid-template-columns: 1fr 180px 110px 110px; gap: 8px; margin-bottom: 12px; }
+.filters { display: grid; grid-template-columns: 1fr 180px 110px 110px 110px; gap: 8px; margin-bottom: 12px; }
 .filters input,.filters select,.filters button { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; background: #fff; }
 .filters button { min-width: 96px; white-space: nowrap; }
 .filters .test-btn { border-color: #f59e0b !important; background: #fbbf24 !important; color: #7c2d12 !important; font-weight: 600; cursor: pointer; }
 .filters .test-btn:disabled { opacity: 0.7; cursor: wait; }
+.node-filter-btn { border-color: #93c5fd !important; background: #eff6ff !important; color: #1d4ed8 !important; font-weight: 600; cursor: pointer; }
+.node-filter-btn:hover { border-color: #60a5fa !important; background: #dbeafe !important; }
 .add-btn { border-color: #1d4ed8 !important; background: #2563eb !important; color: #fff !important; font-weight: 600; cursor: pointer; }
 
 .table-wrap { overflow-x: auto; }

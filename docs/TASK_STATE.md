@@ -1,5 +1,410 @@
 # TASK_STATE
 
+## 2026-09-27 后续：用户确认重启后端，统计修复已部署
+
+- 目标与完成状态：用户明确要求重启后端查看成果；已构建并替换生产 app，统计修复上线。
+- 文件变更：本轮只更新 `docs/TASK_STATE.md`；沿用上一轮已经验证的统计读取修复，无新增业务代码修改。
+- 关键命令：`docker compose -f compose.yaml build app`（TypeScript build 通过）；`docker compose -f compose.yaml up -d --no-deps app`；`docker inspect`；生产容器内直接调用编译后的 GET 处理函数只读核验；`curl http://127.0.0.1:8084/health`；`git diff --check`。
+- Docker 状态：app 新容器 `428a888a72c7`，StartedAt `2026-09-27T15:10:14.734606513Z`，running；镜像 `subscription-manager-app:latest`，digest `sha256:b7881d3a96e7e54f76a1723a0ffb6c59ccb2c5c554c17bba8eb8ed117caeccea`。web、subconverter、Mongo、Redis、Caddy 容器 ID 和启动时间均未变化。
+- API 状态：启动瞬间 health 曾返回 502，启动完成后 HTTP 200，Mongo/Redis connected。新版 GET 处理函数已在生产容器验证：Mongo 总数 91、selected 87、Redis 87、正式发布 Mongo 快照 87，模板 ready 1/1。
+- 已执行用户授权的正常启动缓存恢复/模板预热；未执行 test-all、手动上游刷新或筛选发布，节点选择保持 87/91。
+- 已知现有行为：启动恢复函数把 Mongo/Redis 卡片 success/total 重置为 0/0，因此本次重启后页面会显示 Mongo `0/0 成功，共 91 个节点`、Redis `0/0 成功，共 87 个节点`。节点总数口径修复已生效；未修改用户要求保持的成功数统计或恢复逻辑。
+- 下一步：用户刷新管理页面查看成果（内存会话随后端重启失效，可能需重新登录）。部署阻点已解除；0/0 是现有启动恢复行为，已告知用户。
+
+## 2026-09-27 本轮：管理后台节点池统计口径修复
+
+- 目标与完成状态：统计读取修复完成，编译、lint、真实数据只读处理函数验证通过；生产部署未执行，等待确认启动缓存恢复副作用。
+- 根因：`GET /api/admin/upstreams` 原样返回 `getUpstreamBatchState().mongoNodePool.nodeCount`。发布流程把 `system_state(key=node_pool).payload.node_count` 写入该状态，筛选后为 87，不能代表完整的 91 个候选节点。
+- 修改文件：`backend/src/routes/stage3.ts`，仅 GET 响应中 Mongo nodeCount 改用 `node_pool_entries.countDocuments({})`，Redis nodeCount 改用现有 `getNodePoolMeta().nodeCount`；成功/总上游数、模板状态及存储内容不变。
+- 修改文件：`backend/src/routes/node-pool-filter.ts`，仅 GET mongoTotal 从完整列表长度改为显式 `countDocuments({})`；selected 统计仍为 `countDocuments({selected:true})`；POST 筛选和发布逻辑不变。
+- 修改文件：`docs/TASK_STATE.md`。前端无本轮变更，原有工作区修改保留。
+- 关键命令：`docker build --target build -t subscription-manager-stats-check:local backend`；临时验证容器只读挂载最新 `backend/src` 后执行 `npm run build && npm run lint`，再调用编译后的两个 GET 处理函数（未启动 index/bootstrap）；`git diff --check`；`docker inspect`；`curl http://127.0.0.1:8084/health`。
+- 构建环境：宿主机无 npm，使用 Node Docker 构建环境完成验证。使用迁移后的现有项目 `/srv/projects/subscription-manager`；旧 NAS 路径在此主机不存在。
+- 实际数据：node_pool_entries total=91；selected=true=87；system_state.node_pool.payload.node_count=87；Redis meta.nodeCount=87。
+- 接口验证：新版 GET 处理函数返回上游 Mongo 1/1、91 节点；Redis 1/1、87 节点；模板 ready、1/1。节点筛选返回 mongoTotal=91、mongoSelected=87、redisActive=87。通过断言检查这些结果及上游进度/模板状态不变。
+- 数据保护验证：读取验证前后 node_pool_entries、system_state、upstreams 和 `sm:sub:*` Redis 值的摘要一致；未创建认证会话，未写入业务数据，未调用筛选 POST、test-all、发布、缓存恢复或模板预热，未请求机场。
+- Docker 状态：生产 app/web/subconverter/shared-mongo/shared-redis/gateway-caddy 未重建或重启。app 仍为 `ff10a43928e0`，web 仍为 `1944d37da372`，均 running；仅创建临时验证镜像和已退出的 --rm 验证容器。
+- API/页面状态：生产 `/health` 正常，Mongo/Redis connected。未替换生产后端，所以上游管理线上统计仍为旧口径 87；修复处理函数已验证为 91。节点筛选原有数据源正确，初始显示 91、87/91、87；页面中已选数量来自 selectedIds（由服务端 selected 初始化，未保存操作时反映本地选择），该逻辑未改。未声称完成新版生产浏览器验证。
+- 阻点与下一步：`backend/src/index.ts` 启动时调用 `recoverSubscriptionCaches()`；该函数会更新缓存流程状态、调用 ensureNodePoolCache 和 warmDefaultSubscriptionTemplates。这与本轮禁止恢复 Redis/重建模板的约束冲突，因此未部署。需确认允许正常启动恢复副作用后，才能部署后端并验证生产页面；前端无需重新构建部署。未执行取消 7 个或 test-all 的生产场景，因为两者都会改变业务数据。
+
+---
+
+## Date
+
+2026-09-27（节点筛选前端 5 列网格优化与部署）
+
+## Round Goal
+
+继续优化管理后台“节点筛选”页桌面布局，将节点网格从桌面 3 列调整为 5 列，并按 1500/1200/900/600 断点自动降列；只修改前端布局样式，不修改后端、API 调用、选择状态、搜索、全选/全不选、折叠或确认筛选逻辑。
+
+## Project Current Status
+
+- 已将 `.node-list` 默认桌面布局改为 `repeat(5, minmax(0, 1fr))`。
+- 响应式断点已调整为：`>=1500px` 5 列，`1200px-1499px` 4 列，`900px-1199px` 3 列，`600px-899px` 2 列，`<600px` 1 列。
+- 单节点卡片内部由 grid 改为 flex，仅用于布局抗挤压；checkbox、节点名、protocol badge 的业务和事件逻辑不变。
+- 节点名保留 `min-width: 0`、`overflow: hidden`、`text-overflow: ellipsis`、`white-space: nowrap`；checkbox 和 protocol badge 均设置为不收缩。
+- 已重新构建并部署生产 `subscription-manager-web`；后端、subconverter、Mongo、Redis、Caddy 未重建或重启。
+- 生产入口实际加载新 asset：`/assets/index-BF-P9qOI.js` 与 `/assets/index-WCrfKdH4.css`。
+
+## File Changes In This Round
+
+- Updated: [frontend/src/pages/AdminNodeFilterPage.vue](/srv/projects/subscription-manager/frontend/src/pages/AdminNodeFilterPage.vue)
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed` 检查节点筛选页当前 CSS
+- `git diff --check`
+- `docker inspect subscription-manager-web subscription-manager-app subscription-manager-subconverter shared-mongo shared-redis gateway-caddy`
+- `docker compose -f compose.yaml build web`
+- `docker compose -f compose.yaml up -d --no-deps web`
+- `curl -sI http://127.0.0.1:8084/admin/node-filter`
+- `curl -s http://127.0.0.1:8084/admin/node-filter`
+- `curl -sS -i http://127.0.0.1:8084/health`
+- `curl -sS -i http://127.0.0.1:8084/api/auth/me`
+- 使用 Playwright Docker 镜像临时安装 `playwright@1.60.0`，对生产入口执行 Chromium computed style 与交互验证
+
+## Docker/Container Status
+
+- `subscription-manager-web`: Up，new container id `1944d37da3720f56e211dfc3c94a18028d956026d1eab8bc4ab8c6ccac3d8a2d`，image digest `sha256:30cd5f421c79d0a7f1e2a0b73c6250c2bbf636474db162d414463c688761fd17`
+- `subscription-manager-app`: Up，container id 仍为 `ff10a43928e048a4761191e4fd600e50b4ce70187f84c8a3bd94d7a46924710c`，StartedAt 仍为 `2026-09-27T13:49:40.937931538Z`
+- `subscription-manager-subconverter`: Up，container id 仍为 `6228a4cca251792ca935c94caa197488225cf5b78c0889a9cb644445e8171796`
+- `shared-mongo`: Up，container id 仍为 `4d5e32c2b116c8446301299aa51699f90b4c32af468d74c8bce21adbe55b0953`
+- `shared-redis`: Up，container id 仍为 `02b707fc5925f05981b90639c52926b6e9be9aa472fc1b81687e1b85ca8dcfc7`
+- `gateway-caddy`: Up，container id 仍为 `b27ca8ade5cd9ebf1b3813598aba1f8ffdc9414175798c964cc11458ff625b35`
+
+## API/Interface Status
+
+- `/admin/node-filter`: HTTP 200，生产 SPA HTML 正常返回。
+- `/health`: HTTP 200，Mongo/Redis connected。
+- `/api/auth/me`: 未登录 HTTP 401，认证保护正常。
+- 本轮未改后端接口，未写入数据库或 Redis。
+
+## Validation Result
+
+- Frontend build: pass（Docker build 阶段执行 `vue-tsc -b && vite build`）
+- `git diff --check`: pass
+- Web deploy: pass（`docker compose -f compose.yaml up -d --no-deps web`）
+- 只重建/替换前端：pass（非前端服务容器 ID 和 StartedAt 未变化）
+- Chromium production page layout check: pass
+- 1600px viewport 下 `.node-list` computed `display`: `grid`
+- 1600px viewport 下 computed `grid-template-columns`: `236.391px 236.406px 236.391px 236.406px 236.391px`
+- computed column count: 5
+- 首行 5 个节点卡片 left 坐标为 322、570、819、1067、1316，确认为同一行五列。
+- 长节点名布局：`min-width=0px`、`overflow=hidden`、`text-overflow=ellipsis`、`white-space=nowrap`；测试节点 `clientWidth=116`、`scrollWidth=500`，未撑坏布局。
+- Protocol badge：`flex-shrink=0`，宽度 62px；checkbox：`flex-shrink=0`，宽度 16px。
+- 搜索验证：搜索“日本”后显示 5 个节点。
+- Checkbox/dirty 验证：点击节点后 dirty 提示出现。
+- 机场全不选/全选验证：YTOO 清空后 checked=0，再全选 checked=12。
+- 确认筛选验证：POST body 拦截到 17 个 node id，接口路径和调用逻辑保持不变。
+
+## Notes / Blockers
+
+- 为避免修改真实数据库或 Redis，Chromium 验证拦截了认证/session、节点读取和筛选 POST；验证对象是生产入口加载的真实 JS/CSS bundle 与 DOM/CSS computed style。
+
+## Next Step
+
+- 5 列节点网格已部署生产；可在宽度 1500px 以上浏览器中打开 `/admin/node-filter` 复核实际视觉效果。
+
+## Date
+
+2026-09-27（节点筛选前端生产部署）
+
+## Round Goal
+
+使用当前工作区最新版 frontend 代码，只重新构建并替换生产前端 Web 服务；不重建或重启 `subscription-manager-app`、`subscription-manager-subconverter`、`shared-mongo`、`shared-redis`、`gateway-caddy`，不修改后端代码、数据库或 Redis。
+
+## Project Current Status
+
+- 已确认 `compose.yaml` 前端实际 service name 为 `web`，容器名为 `subscription-manager-web`。
+- 已执行 `docker compose -f compose.yaml build web`，使用当前 `frontend` 代码生成新 `subscription-manager-web:latest` 镜像。
+- 已执行 `docker compose -f compose.yaml up -d --no-deps web`，仅替换 `subscription-manager-web` 容器。
+- `subscription-manager-app`、`subscription-manager-subconverter`、`shared-mongo`、`shared-redis`、`gateway-caddy` 的容器 ID 和 StartedAt 均保持不变，未被重建或重启。
+- 生产 `/admin/node-filter` 入口 HTTP 200，实际加载新 JS asset `index-DCn2mCD9.js`；CSS asset 为 `index-BCWJ4Oq3.css`。
+- 生产入口 `/health` 返回 200，Mongo/Redis dependency 状态均为 connected；未登录 `/api/auth/me` 返回预期 401，API 路由正常。
+- 已使用真实 Chromium 打开生产入口，并以拦截认证和节点读取接口的方式验证线上 bundle 的节点列表布局，未请求或改写真实后端数据。
+
+## File Changes In This Round
+
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `sed -n '1,260p' compose.yaml`
+- `docker compose -f compose.yaml config --services`
+- `docker inspect subscription-manager-web subscription-manager-app subscription-manager-subconverter shared-mongo shared-redis gateway-caddy`
+- `docker compose -f compose.yaml build web`
+- `docker compose -f compose.yaml up -d --no-deps web`
+- `curl -sI http://127.0.0.1:8084/admin/node-filter`
+- `curl -s http://127.0.0.1:8084/admin/node-filter`
+- `curl -sS -i http://127.0.0.1:8084/health`
+- `curl -sS -i http://127.0.0.1:8084/api/auth/me`
+- 使用 Playwright Docker 镜像临时安装 `playwright@1.60.0`，对生产入口执行 Chromium computed style 验证
+- `docker compose -f compose.yaml ps`
+
+## Docker/Container Status
+
+- `subscription-manager-web`: Up，new container id `39ea2347717a6ac20332c8d29fdfa485128b57bfbbb021715dd96c77d77acdd0`，image digest `sha256:61f80c2b0b2cf81315637af95ce3cdeec02597f7e8ee6688d4d08f1790d50fcb`
+- `subscription-manager-app`: Up，container id 仍为 `ff10a43928e048a4761191e4fd600e50b4ce70187f84c8a3bd94d7a46924710c`，StartedAt 仍为 `2026-09-27T13:49:40.937931538Z`
+- `subscription-manager-subconverter`: Up，container id 仍为 `6228a4cca251792ca935c94caa197488225cf5b78c0889a9cb644445e8171796`
+- `shared-mongo`: Up，container id 仍为 `4d5e32c2b116c8446301299aa51699f90b4c32af468d74c8bce21adbe55b0953`
+- `shared-redis`: Up，container id 仍为 `02b707fc5925f05981b90639c52926b6e9be9aa472fc1b81687e1b85ca8dcfc7`
+- `gateway-caddy`: Up，container id 仍为 `b27ca8ade5cd9ebf1b3813598aba1f8ffdc9414175798c964cc11458ff625b35`
+
+## API/Interface Status
+
+- `/admin/node-filter`: HTTP 200，经 Caddy 到新 web 容器正常返回 SPA HTML。
+- `/health`: HTTP 200，返回 `{"ok":true,"dependencies":{"mongo":{"ok":true,"message":"connected"},"redis":{"ok":true,"message":"connected"}}}`。
+- `/api/auth/me`: 未登录 HTTP 401，返回 `UNAUTHORIZED`，符合认证保护预期。
+- 生产页面实际加载 asset：`/assets/index-DCn2mCD9.js` 和 `/assets/index-BCWJ4Oq3.css`。
+
+## Validation Result
+
+- Compose frontend service name: `web`
+- Frontend build: pass（Docker build 阶段执行 `vue-tsc -b && vite build`）
+- Web deploy: pass（`docker compose -f compose.yaml up -d --no-deps web`）
+- 只重建/替换前端：pass（非前端服务容器 ID 和 StartedAt 未变化）
+- Chromium production page layout check: pass
+- `.node-list` computed `display`: `grid`
+- 1320px viewport 下 computed `grid-template-columns`: `308.656px 308.672px 308.656px`
+- computed column count: 3
+- 页面中验证到 2 个机场分组卡片、12 个节点；首行 3 个节点卡片 left 坐标分别为 322、643、963，确认为同一行三列。
+
+## Notes / Blockers
+
+- 为满足“不修改数据库或 Redis”，Chromium 布局验证没有做真实管理员登录，也没有向真实筛选 POST 写入数据；仅拦截认证/session 和节点列表读取接口，用生产页面和生产 bundle 验证 DOM/CSS computed style。
+- Docker build 仍报告现有前端依赖树 5 个漏洞（1 moderate、4 high）；本轮未执行依赖升级或 `npm audit fix`。
+
+## Next Step
+
+- 前端生产部署已完成；可在浏览器打开 `/admin/node-filter` 复核实际视觉效果。
+
+## Date
+
+2026-09-27（节点筛选前端 UI 布局优化）
+
+## Round Goal
+
+仅优化管理后台“节点筛选”页 UI 布局与展示交互：机场保持一行一个分组卡片，展开后节点改为响应式 3/2/1 列网格；不改变后端接口、API 调用、`selectedIds`、dirty 判断或确认筛选逻辑。
+
+## Project Current Status
+
+- 已将 `/admin/node-filter` 机场分组优化为卡片式分组，标题行包含折叠箭头、机场名、已选/总数和右侧“全选 / 全不选”按钮。
+- 机场标题行支持整行点击折叠/展开；机场级按钮使用事件阻止冒泡，不会误触发折叠。
+- 节点列表由纵向单列改为 CSS grid：桌面 3 列、中屏 2 列、小屏 1 列。
+- 单节点展示保持 checkbox、节点名称和协议 badge；节点名超长省略，选中态、hover 态更清晰，不显示 URI、密码、UUID 等敏感信息。
+- 顶部搜索与全局“全部选择 / 全部取消”工具栏改为搜索框优先占宽、按钮右侧对齐；窄屏可自然换行。
+- 三张统计卡仅做轻微视觉优化，数据来源和业务逻辑不变。
+- 未保存修改提示保留，并调整为更醒目的 warning banner。
+- 本轮未修改后端文件、接口、数据库、Redis 发布逻辑，也未部署替换当前运行中的 web 容器。
+
+## File Changes In This Round
+
+- Updated: [frontend/src/pages/AdminNodeFilterPage.vue](/srv/projects/subscription-manager/frontend/src/pages/AdminNodeFilterPage.vue)
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `rg --files`、`sed` 检查 AGENTS、节点筛选页面、前端 package 脚本和任务状态
+- `git status --short`
+- `git diff --check`
+- `docker build -t subscription-manager-frontend-ui-check frontend`（Dockerfile 内执行 `npm ci` 与 `npm run build`，包含 `vue-tsc -b && vite build`）
+- `docker run -d --rm --name subscription-manager-frontend-ui-check-run -p 127.0.0.1:18080:80 subscription-manager-frontend-ui-check:latest`
+- 使用 Playwright Docker 镜像临时安装 `playwright@1.60.0`，拦截认证与节点接口后进行真实 Chromium 页面验证
+- `docker stop subscription-manager-frontend-ui-check-run`
+- `docker ps`
+
+## Docker/Container Status
+
+- `subscription-manager-web`: Up，本轮未替换线上容器镜像
+- `subscription-manager-app`: Up，本轮未重建或重启后端
+- `subscription-manager-subconverter`: Up，本轮未重启
+- `shared-mongo` / `shared-redis`: Up，本轮未写入数据库或 Redis
+- 临时验证容器 `subscription-manager-frontend-ui-check-run` 已停止并自动删除
+
+## API/Interface Status
+
+- 后端接口未修改。
+- 真实浏览器验证使用拦截数据，不请求或改写真实后端数据。
+- 验证数据：2 个机场分组、12 个节点，全部初始选中。
+- 搜索“日本”后仅显示匹配机场的 3 个节点，未匹配机场隐藏。
+- 取消 1 个节点后 dirty 提示显示；确认筛选按钮发出的 POST body 为 11 个 node id，筛选提交链路保持原有接口路径。
+
+## Validation Result
+
+- Frontend TypeScript + Vite production build: pass（通过 Docker build 执行 `vue-tsc -b && vite build`）
+- 响应式列数浏览器验证：1320px = 3 列，1000px = 2 列，700px = 1 列
+- 搜索、dirty 提示、确认筛选 POST 浏览器验证：pass
+- `git diff --check`: pass
+- Frontend ESLint：项目没有 ESLint 依赖、配置或 `lint` 脚本，且当前 shell 没有本机 `npm`；未新增依赖，因此无可执行的前端 ESLint 命令。
+- Docker build 报告现有前端依赖树 5 个漏洞（1 moderate、4 high）；本轮未执行依赖升级或 `npm audit fix`。
+
+## Notes / Blockers
+
+- AGENTS 指定的 NAS 路径 `/vol1/1000/docker/subscription_manager` 在当前会话不存在；本轮在实际 workspace `/srv/projects/subscription-manager` 完成检查、修改和验证。
+- 当前工作区存在上一阶段尚未提交的后端/前端改动；本轮只修改节点筛选页面和任务状态文档，没有回退或覆盖既有改动。
+- 本轮未进行线上 web 容器部署；当前运行中的 `subscription-manager-web` 仍是进入本轮前的镜像。
+
+## Next Step
+
+- 如需线上生效，可按项目实际部署方式重建并替换 `subscription-manager-web`；若要严格执行 AGENTS 中的 NAS 路径规则，需要先确认该路径在当前服务器上的实际映射位置。
+
+## Date
+
+2026-09-27（节点筛选前端第二阶段）
+
+## Round Goal
+
+完成节点筛选管理页、后台导航、上游管理快捷入口、前端 API 封装与真实浏览器联调；不修改第一阶段已验收的后端节点池架构。
+
+## Project Current Status
+
+- 已新增独立管理页 `/admin/node-filter`，页面加载严格使用 GET 返回的 `node.selected` 初始化选择状态。
+- 页面包含 MongoDB 总节点、当前本地选择、Redis 生效节点三张统计卡；未保存修改时会明确显示服务器当前选择数。
+- 已实现节点名称、机场名称、protocol 搜索；搜索仅过滤显示，不修改选择状态。
+- 已实现机场分组、折叠/展开、机场全选/全不选、全局全选/全部取消、单节点 checkbox 和未保存提示。
+- 0 选择时确认按钮禁用且不会发出 POST；提交期间所有选择控件禁用。
+- POST 成功后立即重新 GET，以服务器状态覆盖本地状态并显示实际 Redis 节点数。
+- 空节点池状态会显示原因说明和“返回上游管理”按钮，确认筛选保持禁用。
+- 上游管理工具栏顺序已调整为“全部状态 / 全部测试 / 节点筛选 / 新增上游”；后台侧栏也增加“节点筛选”。
+- 已构建并部署 web 镜像；后端业务代码在本阶段未修改。
+
+## File Changes In This Round
+
+- Added: [frontend/src/pages/AdminNodeFilterPage.vue](/srv/projects/subscription-manager/frontend/src/pages/AdminNodeFilterPage.vue)
+- Updated: [frontend/src/lib/api.ts](/srv/projects/subscription-manager/frontend/src/lib/api.ts)
+- Updated: [frontend/src/router/index.ts](/srv/projects/subscription-manager/frontend/src/router/index.ts)
+- Updated: [frontend/src/components/admin/AdminLayout.vue](/srv/projects/subscription-manager/frontend/src/components/admin/AdminLayout.vue)
+- Updated: [frontend/src/pages/AdminUpstreamsPage.vue](/srv/projects/subscription-manager/frontend/src/pages/AdminUpstreamsPage.vue)
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- 检查前端路由、AdminLayout、API wrapper、上游页和现有后台视觉样式
+- `docker compose build web`（包含 `vue-tsc -b && vite build`）
+- `docker compose up -d --no-deps web`
+- 使用 Playwright Chromium 对生产入口执行管理员登录及真实页面验证
+- 使用受控临时 12 节点源验证筛选 A–E 场景；测试结束后自动恢复 MongoDB、Redis、上游配置与 rotation logs
+- `docker compose ps`、`git diff --check`
+
+## Docker/Container Status
+
+- `subscription-manager-web`: Up，运行本轮新前端镜像
+- `subscription-manager-app`: Up，本阶段未重建或重启后端
+- `subscription-manager-subconverter`: Up，本阶段未重启
+- MongoDB / Redis：连接正常；受控测试数据已全部回滚
+
+## API/Interface Status
+
+- 当前真实 GET：Mongo total=0、selected=0、Redis active=0；页面正确展示空节点池状态。
+- 浏览器受控场景 1：12/12，全部 checkbox 初始勾选。
+- 浏览器受控场景 2：取消 4 个并确认后，Mongo=12、selected=8、Redis=8；页面重新 GET 后保持 8/12。
+- 浏览器受控场景 3：再次修改为 5/12，Redis=5；刷新页面后服务器状态一致。
+- 浏览器受控场景 4：返回上游管理执行“全部测试”后，新 entries 恢复全部选中，页面为 12/12、Redis=12。
+- 浏览器受控场景 5：搜索“香港”仅显示 6 条，清除搜索后仍保持原选择状态。
+- 浏览器受控场景 6：全部取消后确认按钮禁用，网络监听确认没有调用筛选 POST。
+- 机场折叠/展开、机场全选/全不选、全局全选/全部取消：浏览器验证通过。
+- GET/POST 前端联调未发现后端 API bug，本阶段未修改后端。
+
+## Validation Result
+
+- Frontend TypeScript + Vite production build: pass
+- `git diff --check`: pass
+- 真实浏览器桌面页面布局与空状态：pass
+- 真实浏览器有节点场景及交互：pass
+- 管理员认证、侧栏路由、上游快捷按钮位置：pass
+- Frontend ESLint：项目没有 ESLint 依赖、配置或 `lint` 脚本，因此本轮无可执行的前端 ESLint 命令；未为此引入新依赖。
+- npm 构建报告现有前端依赖树 5 个漏洞（1 moderate、4 high）；本轮未执行可能引入破坏性升级的 `npm audit fix`。
+
+## Notes / Blockers
+
+- 前端功能和后端 API 联调无代码阻塞。
+- 当前真实 `Flowers` 上游仍无有效节点，所以生产页当前显示 0/0；需要有效上游链接并成功执行一次“全部测试”后才能显示真实节点。
+
+## Next Step
+
+- 等待用户提供有效上游并执行真实 test-all；之后可直接在已部署的 `/admin/node-filter` 页面进行生产节点筛选。
+
+## Date
+
+2026-09-27
+
+## Round Goal
+
+完成“节点筛选”第一阶段后端：批量刷新时全量重建 `node_pool_entries` 并默认全选；管理员可从当前 entries 选择节点并重新发布 MongoDB 正式快照、Redis 节点池和订阅模板，筛选过程不得重新请求上游。
+
+## Project Current Status
+
+- 已新增 MongoDB collection `node_pool_entries` 及所需的 3 个非唯一索引。
+- 现有 `runUpstreamBatchRefresh()` 仍直接使用原 `nextNodePoolText` 发布完整节点池，同时按上游及节点原始顺序写入 entries，所有新 entry 均为 `selected=true`。
+- 已抽取原正式发布链路为 `publishNodePool()`，批量刷新和管理员筛选共用相同的 MongoDB → Redis → template 发布顺序。
+- 已新增管理员 GET/POST API，GET 不返回 URI 或凭据；POST 只接受 Mongo ObjectId，并在单次 Mongo update pipeline 中设置全部 selected 状态。
+- 筛选与批量刷新共用 Redis 锁 `sm:sub:upstream-batch-lock`；筛选不会调用上游拉取、连接测试或批量刷新。
+- 受控集成测试 A–E 全部通过：默认 12/12、筛选 8/12、再次筛选 5/12、重新批量刷新恢复 12/12、空选择 400 且所有状态不变。
+- 受控测试结束后已恢复测试前的上游配置、MongoDB/Redis 状态和测试生成的 rotation logs，没有保留测试节点。
+- 当前真实唯一启用上游 `Flowers` 返回 HTTP 400，响应说明其内层链接不含有效节点；真实批量刷新按现有失败语义未能生成节点，因此当前正式节点池为 0。该问题与本轮筛选代码无关，但需要更新有效上游链接后再次执行 test-all。
+
+## File Changes In This Round
+
+- Added: [backend/src/lib/node-pool-entry.ts](/srv/projects/subscription-manager/backend/src/lib/node-pool-entry.ts)
+- Added: [backend/src/lib/node-pool-operation-lock.ts](/srv/projects/subscription-manager/backend/src/lib/node-pool-operation-lock.ts)
+- Added: [backend/src/services/node-pool-publisher.ts](/srv/projects/subscription-manager/backend/src/services/node-pool-publisher.ts)
+- Added: [backend/src/routes/node-pool-filter.ts](/srv/projects/subscription-manager/backend/src/routes/node-pool-filter.ts)
+- Updated: [backend/src/lib/db.ts](/srv/projects/subscription-manager/backend/src/lib/db.ts)
+- Updated: [backend/src/services/upstream-batch-runner.ts](/srv/projects/subscription-manager/backend/src/services/upstream-batch-runner.ts)
+- Updated: [backend/src/index.ts](/srv/projects/subscription-manager/backend/src/index.ts)
+- Updated: [docs/TASK_STATE.md](/srv/projects/subscription-manager/docs/TASK_STATE.md)
+
+## Commands Executed In This Round
+
+- `docker compose build app`（Docker 构建阶段执行 `tsc -p tsconfig.json`）
+- `docker run ... npm run lint`
+- 8 种协议的 `node-pool-entry` 容器内断言测试
+- `docker compose up -d --no-deps app`
+- 管理员 API 真实调用：`POST /api/admin/upstreams/test-all`、`GET /api/admin/node-pool-nodes`、`POST /api/admin/node-pool/filter`
+- 使用临时本机 SS 订阅源执行 A–E 集成测试，并在 finally 中精确恢复测试前状态
+- `docker compose ps`、`GET /health`、`git diff --check`
+
+## Docker/Container Status
+
+- `subscription-manager-app`: Up，运行本轮最终后端镜像
+- `subscription-manager-web`: Up，本轮未修改、未重建前端
+- `subscription-manager-subconverter`: Up，本轮未重启
+- MongoDB / Redis：连接正常；未重启、未清库
+
+## API/Interface Status
+
+- `GET /api/admin/node-pool-nodes`: requireAdmin；未登录返回 401；返回分组、节点安全元数据和 Mongo/Redis 数量，不返回 URI/凭据。
+- `POST /api/admin/node-pool/filter`: requireAdmin；非法 ObjectId 返回 400；空数组返回 400；有效选择会重新发布正式快照、Redis 和模板。
+- 受控 A：entries=12，selected=12，system_state=12，Redis=12，模板=12，用户 Clash 订阅=12。
+- 受控 B：entries=12，selected=8，system_state=8，Redis=8，模板=8；上游请求数=0，`last_test_at` 不变。
+- 受控 C：entries=12，selected=5，system_state=5，Redis=5，模板=5；上游请求数=0。
+- 受控 D：重新 test-all 后 entries 的 ObjectId 全量重建，selected=12，system_state=12，Redis=12，模板=12。
+- 受控 E：`nodeIds=[]` 返回 400；selected、正式快照 hash、Redis hash、模板节点数、version 全部不变。
+- 当前真实状态：`node_pool_entries=0`、selected=0、`system_state.node_pool=0`、Redis nodeCount=0、模板=0；原因是当前真实上游无有效节点。
+
+## Validation Result
+
+- Backend TypeScript build: pass
+- Backend ESLint: pass
+- `git diff --check`: pass
+- 协议元数据解析：SS、SSR、VMess、VLESS、Trojan、Hysteria2、TUIC、AnyTLS 全部通过
+- URI 原文保留、顺序保持、重复节点保留：pass
+- A–E MongoDB / Redis / template / version 集成断言：pass
+- GET 敏感字段检查、requireAdmin、非法 ObjectId：pass
+- App `/health`：pass
+- npm 构建报告现有依赖树 7 个漏洞（1 low、3 moderate、3 high）；本轮未执行破坏性依赖升级。
+
+## Notes / Blockers
+
+- 当前真实上游链接已失效或其内层订阅无有效节点，导致真实 test-all 无法完成 A/D 的生产数据验收，并按既有发布失败语义留下空正式节点池。
+- subconverter 冷缓存首次下载外部规则集超过 10 秒配置超时；缓存就绪后完整 A–E 重跑通过。这是现有模板链路行为，本轮未修改超时或 subconverter 配置。
+- 后端实现无已知代码阻塞；需要有效上游链接后再执行一次真实 test-all，才能生成生产 `node_pool_entries` 并恢复用户订阅。
+
+## Next Step
+
+- 等待用户提供/更新有效的 `Flowers` 上游订阅链接；随后只需执行一次现有 test-all 并复核真实 entries、正式快照、Redis、模板和用户订阅数量。前端节点筛选页面尚未开始，等待用户确认第二阶段。
+
 ## Date
 
 2026-07-30
